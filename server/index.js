@@ -7,9 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 const CACHE_MS = 60 * 60 * 1000;
-const DATA = path.join(__dirname, "data.json");
-
-app.use(express.static(path.join(__dirname, "../public")));
+const DATA_FILE = path.join(__dirname, "data.json");
 
 const players = {
   guilherme: {
@@ -33,40 +31,43 @@ let cacheAt = 0;
 function parseKm(text) {
   if (!text) return null;
 
-  const match = String(text).match(
-    /([0-9][0-9\s.,'’]*)\s*km/i
+  const matches = String(text).match(
+    /([0-9][0-9\s.,'’]*)\s*km/gi
   );
 
-  if (!match) return null;
+  if (!matches || !matches.length) {
+    return null;
+  }
 
-  const value = match[1]
-    .replace(/[^\d]/g, "");
+  for (const match of matches) {
+    const number = match
+      .replace(/km/i, "")
+      .replace(/[^\d]/g, "");
 
-  const number = Number(value);
+    const value = Number(number);
 
-  return Number.isFinite(number)
-    ? number
-    : null;
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 
 function getMonthParts() {
-  const now = new Date();
-
-  const formatter = new Intl.DateTimeFormat(
+  const parts = new Intl.DateTimeFormat(
     "en-US",
     {
       timeZone: "Europe/Madrid",
       year: "numeric",
       month: "2-digit"
     }
-  );
-
-  const parts = formatter.formatToParts(now);
+  ).formatToParts(new Date());
 
   return {
-    year: parts.find(p => p.type === "year")?.value,
-    month: parts.find(p => p.type === "month")?.value
+    year: parts.find(x => x.type === "year").value,
+    month: parts.find(x => x.type === "month").value
   };
 }
 
@@ -81,111 +82,174 @@ function getMonthLabel() {
     }
   )
     .format(new Date())
-    .replace(/^./, c => c.toUpperCase());
+    .replace(/^./, x => x.toUpperCase());
 }
 
 
 /* =========================================================
-   EXTRAI DADOS DA PÁGINA
+   EXAMINA CONTROLES DO TRUCKERSBOOK
 ========================================================= */
 
-async function inspectPage(page, playerName) {
+async function inspectControls(page) {
 
-  console.log(
-    "ANALISANDO ESTRUTURA DO TRUCKERSBOOK..."
-  );
+  const controls = await page.evaluate(() => {
 
-  const info = await page.evaluate(() => {
+    const result = [];
 
-    const forms = Array.from(
-      document.querySelectorAll("form")
-    ).map((form, index) => ({
-      index,
-      action: form.action,
-      method: form.method,
-      id: form.id,
-      name: form.getAttribute("name") || "",
-      text: (form.innerText || "").slice(0, 1000)
-    }));
+    const elements = document.querySelectorAll(
+      "select, input, button, [role='combobox'], [role='listbox']"
+    );
 
+    for (const el of elements) {
 
-    const selects = Array.from(
-      document.querySelectorAll("select")
-    ).map((select, index) => ({
-      index,
-      name: select.name || "",
-      id: select.id || "",
-      value: select.value || "",
-      options: Array.from(select.options).map(option => ({
-        text: (option.textContent || "").trim(),
-        value: option.value
-      }))
-    }));
+      const rect = el.getBoundingClientRect();
 
+      result.push({
+        tag: el.tagName,
+        type: el.getAttribute("type") || "",
+        id: el.id || "",
+        name: el.getAttribute("name") || "",
+        value: el.value || "",
+        text: (el.innerText || "").trim().slice(0, 300),
+        aria:
+          el.getAttribute("aria-label") || "",
+        placeholder:
+          el.getAttribute("placeholder") || "",
+        class:
+          el.className?.toString().slice(0, 300) || "",
+        visible:
+          rect.width > 0 &&
+          rect.height > 0
+      });
+    }
 
-    const buttons = Array.from(
-      document.querySelectorAll(
-        "button, input[type=submit], input[type=button]"
-      )
-    ).map((button, index) => ({
-      index,
-      tag: button.tagName,
-      type: button.getAttribute("type") || "",
-      name: button.getAttribute("name") || "",
-      value: button.getAttribute("value") || "",
-      text:
-        (
-          button.innerText ||
-          button.value ||
-          ""
-        ).trim()
-    }));
-
-
-    return {
-      url: location.href,
-      title: document.title,
-      forms,
-      selects,
-      buttons
-    };
-
+    return result;
   });
 
-
-  console.log(
-    "===== FORMS ====="
-  );
+  console.log("========== CONTROLES ==========");
 
   console.log(
     JSON.stringify(
-      info.forms,
+      controls,
       null,
       2
     )
   );
 
+  return controls;
+}
+
+
+/* =========================================================
+   PROCURA CONTROLE DO PLAYER
+========================================================= */
+
+async function selectPlayer(
+  page,
+  player
+) {
 
   console.log(
-    "===== SELECTS ====="
+    `PROCURANDO JOGADOR: ${player.name} (${player.id})`
+  );
+
+
+  /*
+   * Primeiro inspecionamos todos os controles.
+   */
+
+  const controls =
+    await inspectControls(page);
+
+
+  /*
+   * Procura elementos que contenham:
+   *
+   * Guilherme BR
+   * Fantasma MG
+   * 80613
+   * 321853
+   */
+
+  const candidate =
+    await page.evaluate(
+      ({ name, id }) => {
+
+        const text =
+          document.body.innerText || "";
+
+        const all =
+          Array.from(
+            document.querySelectorAll("*")
+          );
+
+        const found = [];
+
+        for (const el of all) {
+
+          const value =
+            (
+              el.textContent ||
+              ""
+            ).trim();
+
+          if (!value) continue;
+
+          if (
+            value === name ||
+            value.includes(name) ||
+            value.includes(String(id))
+          ) {
+
+            const rect =
+              el.getBoundingClientRect();
+
+            found.push({
+              tag: el.tagName,
+              id: el.id || "",
+              name:
+                el.getAttribute("name") || "",
+              value:
+                el.getAttribute("value") || "",
+              role:
+                el.getAttribute("role") || "",
+              text:
+                value.slice(0, 500),
+              html:
+                el.outerHTML.slice(0, 1500),
+              visible:
+                rect.width > 0 &&
+                rect.height > 0
+            });
+          }
+        }
+
+        return {
+          bodyHasName:
+            text.includes(name),
+
+          bodyHasId:
+            text.includes(String(id)),
+
+          found:
+            found.slice(0, 30)
+        };
+
+      },
+      {
+        name: player.name,
+        id: player.id
+      }
+    );
+
+
+  console.log(
+    "========== CANDIDATOS PLAYER =========="
   );
 
   console.log(
     JSON.stringify(
-      info.selects,
-      null,
-      2
-    )
-  );
-
-
-  console.log(
-    "===== BUTTONS ====="
-  );
-
-  console.log(
-    JSON.stringify(
-      info.buttons,
+      candidate,
       null,
       2
     )
@@ -193,98 +257,443 @@ async function inspectPage(page, playerName) {
 
 
   /*
-   * Procuramos o jogador diretamente no HTML.
+   * =======================================================
+   * SELECT NATIVO
+   * =======================================================
    */
 
-  const foundPlayer =
-    await page.evaluate(
-      (name) => {
+  const selects =
+    await page.locator("select").all();
 
-        const elements =
-          Array.from(
-            document.querySelectorAll("*")
-          );
 
-        const element =
-          elements.find(
-            el =>
-              (
-                el.textContent || ""
-              ).trim() === name
-          );
+  for (const select of selects) {
 
-        if (!element) {
-          return null;
+    const options =
+      await select.locator("option").all();
+
+
+    for (const option of options) {
+
+      const text =
+        (
+          await option.innerText()
+        ).trim();
+
+
+      const value =
+        await option.getAttribute(
+          "value"
+        );
+
+
+      if (
+        text === player.name ||
+        text.includes(player.name) ||
+        value === String(player.id) ||
+        value?.includes(String(player.id))
+      ) {
+
+        console.log(
+          "PLAYER ENCONTRADO EM SELECT:",
+          text,
+          value
+        );
+
+
+        await select.selectOption(
+          value
+        );
+
+
+        return true;
+      }
+    }
+  }
+
+
+  /*
+   * =======================================================
+   * INPUT
+   * =======================================================
+   */
+
+  const inputs =
+    await page.locator("input").all();
+
+
+  for (const input of inputs) {
+
+    const value =
+      await input.getAttribute("value");
+
+    const name =
+      await input.getAttribute("name");
+
+    const id =
+      await input.getAttribute("id");
+
+    const type =
+      await input.getAttribute("type");
+
+
+    if (
+      value === player.name ||
+      value === String(player.id) ||
+      name === "player" ||
+      name === "player_id" ||
+      name === "playerId" ||
+      id === "player" ||
+      id === "player_id" ||
+      id === "playerId"
+    ) {
+
+      console.log(
+        "INPUT PLAYER ENCONTRADO:",
+        {
+          id,
+          name,
+          value,
+          type
         }
+      );
 
-        let current = element;
 
-        for (
-          let i = 0;
-          i < 8 && current;
-          i++
-        ) {
+      await input.fill(
+        String(player.id)
+      );
 
-          const text =
-            current.innerText || "";
 
-          const km =
-            text.match(
-              /([0-9][0-9\s.,'’]*)\s*km/i
-            );
+      return true;
+    }
+  }
 
-          if (km) {
-            return {
-              text,
-              html:
-                current.outerHTML.slice(
-                  0,
-                  3000
-                )
-            };
-          }
 
-          current =
-            current.parentElement;
-        }
+  /*
+   * =======================================================
+   * COMBOBOX / SELECT2 / BOOTSTRAP
+   * =======================================================
+   */
 
-        return {
-          text:
-            element.innerText || "",
-          html:
-            element.outerHTML.slice(
-              0,
-              3000
-            )
-        };
-
-      },
-      playerName
+  const combo =
+    page.locator(
+      "[role='combobox']"
     );
 
 
+  const comboCount =
+    await combo.count();
+
+
+  for (
+    let i = 0;
+    i < comboCount;
+    i++
+  ) {
+
+    const el =
+      combo.nth(i);
+
+
+    const text =
+      (
+        await el.innerText()
+      ).trim();
+
+
+    const aria =
+      await el.getAttribute(
+        "aria-label"
+      );
+
+
+    const placeholder =
+      await el.getAttribute(
+        "placeholder"
+      );
+
+
+    console.log(
+      "COMBOBOX:",
+      {
+        text,
+        aria,
+        placeholder
+      }
+    );
+
+
+    if (
+      /player|jogador/i.test(
+        `${text} ${aria} ${placeholder}`
+      )
+    ) {
+
+      console.log(
+        "COMBOBOX DO PLAYER ENCONTRADO"
+      );
+
+
+      await el.click();
+
+
+      await page.waitForTimeout(
+        500
+      );
+
+
+      /*
+       * Procura o nome depois que o dropdown abriu.
+       */
+
+      const option =
+        page.getByText(
+          player.name,
+          {
+            exact: true
+          }
+        ).last();
+
+
+      if (
+        await option.count() > 0
+      ) {
+
+        await option.click();
+
+        return true;
+      }
+
+
+      /*
+       * Procura pelo ID.
+       */
+
+      const idOption =
+        page.getByText(
+          String(player.id),
+          {
+            exact: true
+          }
+        ).last();
+
+
+      if (
+        await idOption.count() > 0
+      ) {
+
+        await idOption.click();
+
+        return true;
+      }
+    }
+  }
+
+
+  /*
+   * =======================================================
+   * BOTÕES / DROPDOWNS
+   * =======================================================
+   */
+
+  const buttons =
+    page.locator(
+      "button"
+    );
+
+
+  const buttonCount =
+    await buttons.count();
+
+
+  for (
+    let i = 0;
+    i < buttonCount;
+    i++
+  ) {
+
+    const button =
+      buttons.nth(i);
+
+
+    const text =
+      (
+        await button.innerText()
+      ).trim();
+
+
+    if (
+      /player|jogador/i.test(text)
+    ) {
+
+      console.log(
+        "BOTÃO PLAYER:",
+        text
+      );
+
+
+      await button.click();
+
+      await page.waitForTimeout(
+        500
+      );
+
+
+      const option =
+        page.getByText(
+          player.name,
+          {
+            exact: true
+          }
+        ).last();
+
+
+      if (
+        await option.count() > 0
+      ) {
+
+        await option.click();
+
+        return true;
+      }
+    }
+  }
+
+
   console.log(
-    "===== PLAYER ====="
+    "NÃO CONSEGUI SELECIONAR O PLAYER."
+  );
+
+  return false;
+}
+
+
+/* =========================================================
+   CONFIRM
+========================================================= */
+
+async function confirmPlayer(page) {
+
+  const confirm =
+    page.getByRole(
+      "button",
+      {
+        name: "Confirm",
+        exact: true
+      }
+    );
+
+
+  if (
+    await confirm.count() === 0
+  ) {
+
+    console.log(
+      "BOTÃO CONFIRM NÃO ENCONTRADO."
+    );
+
+    return false;
+  }
+
+
+  console.log(
+    "CLICANDO CONFIRM..."
+  );
+
+
+  const beforeUrl =
+    page.url();
+
+
+  const requests = [];
+
+
+  const requestHandler =
+    request => {
+
+      if (
+        request.method() !== "GET" ||
+        request.resourceType() ===
+          "document"
+      ) {
+
+        requests.push({
+          method:
+            request.method(),
+
+          url:
+            request.url(),
+
+          postData:
+            request.postData()
+        });
+
+      }
+    };
+
+
+  page.on(
+    "request",
+    requestHandler
+  );
+
+
+  try {
+
+    await Promise.race([
+
+      confirm.click(),
+
+      page.waitForTimeout(
+        10000
+      )
+
+    ]);
+
+  } finally {
+
+    page.off(
+      "request",
+      requestHandler
+    );
+
+  }
+
+
+  await page.waitForTimeout(
+    2500
+  );
+
+
+  console.log(
+    "URL ANTES:",
+    beforeUrl
+  );
+
+  console.log(
+    "URL DEPOIS:",
+    page.url()
+  );
+
+
+  console.log(
+    "REQUESTS DO CONFIRM:"
   );
 
   console.log(
     JSON.stringify(
-      foundPlayer,
+      requests,
       null,
       2
     )
   );
 
 
-  return {
-    info,
-    foundPlayer
-  };
+  return true;
 }
 
 
 /* =========================================================
-   EXTRAI KM DO JOGADOR
+   EXTRAI KM
 ========================================================= */
 
 async function extractPlayerKm(
@@ -293,68 +702,65 @@ async function extractPlayerKm(
 ) {
 
   /*
-   * 1 — Link exato
+   * Primeiro tenta linhas de tabela.
    */
 
-  const playerLink =
-    page.getByRole("link", {
-      name: playerName,
-      exact: true
-    }).first();
+  const rows =
+    page.locator("tr");
 
 
-  if (
-    await playerLink.count() > 0
+  const rowCount =
+    await rows.count();
+
+
+  for (
+    let i = 0;
+    i < rowCount;
+    i++
   ) {
 
+    const row =
+      rows.nth(i);
+
+
     const text =
-      await playerLink.evaluate(
-        el => {
+      (
+        await row.innerText()
+      ).trim();
 
-          let current = el;
 
-          for (
-            let i = 0;
-            i < 8 && current;
-            i++
-          ) {
+    if (
+      text.includes(playerName)
+    ) {
 
-            const value =
-              current.innerText || "";
+      console.log(
+        "LINHA DO PLAYER:"
+      );
 
-            if (
-              /\d[\d\s.,'’]*\s*km/i.test(
-                value
-              )
-            ) {
-              return value;
-            }
-
-            current =
-              current.parentElement;
-          }
-
-          return "";
-        }
+      console.log(
+        text
       );
 
 
-    const km =
-      parseKm(text);
+      const km =
+        parseKm(text);
 
 
-    if (km !== null) {
-      return km;
+      if (km !== null) {
+        return km;
+      }
     }
   }
 
 
   /*
-   * 2 — Texto da página
+   * Procura blocos próximos ao nome.
    */
 
   const body =
-    await page.locator("body").innerText();
+    await page.locator(
+      "body"
+    ).innerText();
 
 
   const lines =
@@ -366,16 +772,18 @@ async function extractPlayerKm(
 
   const index =
     lines.findIndex(
-      x => x === playerName
+      x =>
+        x === playerName ||
+        x.includes(playerName)
     );
 
 
-  if (index !== -1) {
+  if (index >= 0) {
 
     for (
-      let i = index + 1;
+      let i = index;
       i < Math.min(
-        index + 15,
+        index + 20,
         lines.length
       );
       i++
@@ -385,6 +793,12 @@ async function extractPlayerKm(
         parseKm(lines[i]);
 
       if (km !== null) {
+
+        console.log(
+          "KM ENCONTRADO:",
+          km
+        );
+
         return km;
       }
     }
@@ -392,23 +806,74 @@ async function extractPlayerKm(
 
 
   /*
-   * 3 — Procura o nome e KM no mesmo bloco
+   * Última tentativa: procura link do perfil.
    */
 
-  const blocks =
-    await page.locator(
-      "tr, li, .card, .row"
-    ).allInnerTexts();
+  const profile =
+    page.locator(
+      `a[href*="/profile/"]`
+    );
 
 
-  for (const block of blocks) {
+  const profileCount =
+    await profile.count();
+
+
+  for (
+    let i = 0;
+    i < profileCount;
+    i++
+  ) {
+
+    const link =
+      profile.nth(i);
+
+
+    const text =
+      (
+        await link.innerText()
+      ).trim();
+
 
     if (
-      block.includes(playerName)
+      text.includes(playerName)
     ) {
 
+      const parentText =
+        await link.evaluate(
+          el => {
+
+            let p = el;
+
+            for (
+              let i = 0;
+              i < 6 && p;
+              i++
+            ) {
+
+              const t =
+                p.innerText || "";
+
+              if (
+                /\d[\d\s.,'’]*\s*km/i.test(
+                  t
+                )
+              ) {
+                return t;
+              }
+
+              p =
+                p.parentElement;
+            }
+
+            return "";
+          }
+        );
+
+
       const km =
-        parseKm(block);
+        parseKm(parentText);
+
 
       if (km !== null) {
         return km;
@@ -417,19 +882,23 @@ async function extractPlayerKm(
   }
 
 
+  console.log(
+    `KM NÃO ENCONTRADO PARA ${playerName}`
+  );
+
   return null;
 }
 
 
 /* =========================================================
-   CONSULTA
+   READ STATS
 ========================================================= */
 
 async function readPlayerStats({
   browser,
   period,
   mode,
-  playerName
+  player
 }) {
 
   const modePath = {
@@ -438,51 +907,56 @@ async function readPlayerStats({
   }[mode];
 
 
-  if (!modePath) {
-    throw new Error(
-      "Modo inválido: " + mode
-    );
-  }
+  const url =
+    period === "alltime"
+      ? `https://trucksbook.eu/player_stats/0/0/1/${modePath}`
+      : (() => {
 
+          const {
+            year,
+            month
+          } = getMonthParts();
 
-  let url;
+          return `https://trucksbook.eu/player_stats/${year}/${month}/1/${modePath}`;
 
-
-  if (period === "alltime") {
-
-    url =
-      `https://trucksbook.eu/player_stats/0/0/1/${modePath}`;
-
-  } else {
-
-    const {
-      year,
-      month
-    } = getMonthParts();
-
-    url =
-      `https://trucksbook.eu/player_stats/${year}/${month}/1/${modePath}`;
-  }
+        })();
 
 
   console.log(
-    "--------------------------------"
+    "======================================"
   );
 
   console.log(
-    `CONSULTA: ${playerName}`
+    "TRUCKERSBOOK"
   );
 
   console.log(
-    `Período: ${period}`
+    "Jogador:",
+    player.name
   );
 
   console.log(
-    `Modo: ${mode}`
+    "ID:",
+    player.id
   );
 
   console.log(
-    `URL: ${url}`
+    "Período:",
+    period
+  );
+
+  console.log(
+    "Modo:",
+    mode
+  );
+
+  console.log(
+    "URL:",
+    url
+  );
+
+  console.log(
+    "======================================"
   );
 
 
@@ -494,110 +968,66 @@ async function readPlayerStats({
 
   try {
 
-    /*
-     * Captura requisições POST/XHR para descobrir
-     * como o filtro do TrucksBook funciona.
-     */
-
-    page.on(
-      "request",
-      request => {
-
-        const method =
-          request.method();
-
-        if (
-          method === "POST" ||
-          request.resourceType() ===
-            "xhr" ||
-          request.resourceType() ===
-            "fetch"
-        ) {
-
-          console.log(
-            "REQUEST:",
-            method,
-            request.url()
-          );
-
-          const data =
-            request.postData();
-
-          if (data) {
-
-            console.log(
-              "POST DATA:",
-              data.slice(0, 2000)
-            );
-          }
-        }
-      }
-    );
-
-
-    page.on(
-      "response",
-      response => {
-
-        const type =
-          response.request().resourceType();
-
-        if (
-          type === "xhr" ||
-          type === "fetch"
-        ) {
-
-          console.log(
-            "RESPONSE:",
-            response.status(),
-            response.url()
-          );
-        }
-      }
-    );
-
-
     await page.goto(
       url,
       {
-        waitUntil:
-          "networkidle",
+        waitUntil: "domcontentloaded",
         timeout: 60000
       }
     );
 
 
     await page.waitForTimeout(
-      2000
+      5000
     );
 
 
     /*
-     * Diagnóstico da página.
+     * Tenta selecionar o jogador.
      */
 
-    await inspectPage(
-      page,
-      playerName
+    const selected =
+      await selectPlayer(
+        page,
+        player
+      );
+
+
+    if (selected) {
+
+      console.log(
+        "PLAYER SELECIONADO."
+      );
+
+
+      await confirmPlayer(
+        page
+      );
+
+    } else {
+
+      console.log(
+        "PLAYER NÃO FOI SELECIONADO."
+      );
+    }
+
+
+    await page.waitForTimeout(
+      3000
     );
 
 
-    /*
-     * Primeiro tenta encontrar o jogador
-     * sem mexer no formulário.
-     */
-
-    let km =
+    const km =
       await extractPlayerKm(
         page,
-        playerName
+        player.name
       );
 
 
     if (km !== null) {
 
       console.log(
-        `SUCESSO DIRETO: ${playerName} = ${km} km`
+        `RESULTADO ${player.name}: ${km} KM`
       );
 
       return km;
@@ -605,227 +1035,32 @@ async function readPlayerStats({
 
 
     /*
-     * Descobre automaticamente o select
-     * que contém o jogador.
+     * Se não achou, mostra URL final e trecho da página.
      */
-
-    const playerSelect =
-      page.locator(
-        "select"
-      ).filter({
-        hasText: playerName
-      }).first();
-
-
-    if (
-      await playerSelect.count() > 0
-    ) {
-
-      console.log(
-        "SELECT DO JOGADOR ENCONTRADO."
-      );
-
-
-      const option =
-        playerSelect
-          .locator("option")
-          .filter({
-            hasText: playerName
-          })
-          .first();
-
-
-      if (
-        await option.count() > 0
-      ) {
-
-        const value =
-          await option.getAttribute(
-            "value"
-          );
-
-
-        console.log(
-          "PLAYER VALUE:",
-          value
-        );
-
-
-        await playerSelect.selectOption(
-          value
-        );
-
-
-        /*
-         * Procura botão Confirm.
-         */
-
-        const confirm =
-          page.locator(
-            "button, input[type=submit]"
-          ).filter({
-            hasText: /confirm/i
-          }).first();
-
-
-        if (
-          await confirm.count() > 0
-        ) {
-
-          console.log(
-            "CONFIRM ENCONTRADO."
-          );
-
-
-          await Promise.all([
-            confirm.click(),
-            page.waitForLoadState(
-              "networkidle",
-              {
-                timeout: 30000
-              }
-            ).catch(() => {})
-          ]);
-
-        } else {
-
-          console.log(
-            "CONFIRM NÃO ENCONTRADO."
-          );
-        }
-
-
-        await page.waitForTimeout(
-          2000
-        );
-
-
-        km =
-          await extractPlayerKm(
-            page,
-            playerName
-          );
-
-
-        if (km !== null) {
-
-          console.log(
-            `SUCESSO APÓS FILTRO: ${playerName} = ${km} km`
-          );
-
-          return km;
-        }
-      }
-    }
-
-
-    /*
-     * Tenta encontrar links de perfil.
-     */
-
-    const profileId =
-      playerName === "Guilherme BR"
-        ? players.guilherme.id
-        : players.fantasma.id;
-
-
-    const profileLinks =
-      await page.locator("a").evaluateAll(
-        (links, id) =>
-          links
-            .map(a => ({
-              text:
-                (
-                  a.innerText || ""
-                ).trim(),
-              href:
-                a.href
-            }))
-            .filter(
-              x =>
-                x.href &&
-                x.href.includes(
-                  `/profile/${id}`
-                )
-            ),
-        profileId
-      );
-
-
-    if (
-      profileLinks.length > 0
-    ) {
-
-      console.log(
-        "PROFILE LINK:",
-        profileLinks[0]
-      );
-
-      const profilePage =
-        await browser.newPage({
-          locale: "pt-BR"
-        });
-
-
-      try {
-
-        await profilePage.goto(
-          profileLinks[0].href,
-          {
-            waitUntil:
-              "networkidle",
-            timeout: 60000
-          }
-        );
-
-
-        await profilePage.waitForTimeout(
-          2000
-        );
-
-
-        const text =
-          await profilePage
-            .locator("body")
-            .innerText();
-
-
-        console.log(
-          "PROFILE TEXT:",
-          text.slice(0, 5000)
-        );
-
-
-      } finally {
-
-        await profilePage.close();
-
-      }
-    }
-
-
-    /*
-     * Salva HTML de diagnóstico.
-     */
-
-    const html =
-      await page.content();
-
 
     console.log(
-      "HTML LENGTH:",
-      html.length
+      "URL FINAL:",
+      page.url()
     );
 
 
+    const body =
+      await page.locator(
+        "body"
+      ).innerText();
+
+
     console.log(
-      "PLAYER NÃO ENCONTRADO:",
-      playerName
+      "TRECHO FINAL DA PÁGINA:"
+    );
+
+    console.log(
+      body.slice(0, 6000)
     );
 
 
     throw new Error(
-      `${playerName} não encontrado`
+      `Não foi possível obter KM de ${player.name}`
     );
 
 
@@ -838,7 +1073,7 @@ async function readPlayerStats({
 
 
 /* =========================================================
-   MENSAL
+   MONTHLY
 ========================================================= */
 
 async function getMonthly() {
@@ -866,7 +1101,7 @@ async function getMonthly() {
 async function getAllTime(browser) {
 
   console.log(
-    "================================"
+    "######################################"
   );
 
   console.log(
@@ -874,23 +1109,16 @@ async function getAllTime(browser) {
   );
 
   console.log(
-    "================================"
+    "######################################"
   );
 
-
-  /*
-   * IMPORTANTE:
-   * Fazemos sequencialmente.
-   * Não abrimos 3 Chromiums ao mesmo tempo.
-   */
 
   const guilhermeReal =
     await readPlayerStats({
       browser,
       period: "alltime",
       mode: "real",
-      playerName:
-        players.guilherme.name
+      player: players.guilherme
     });
 
 
@@ -899,8 +1127,7 @@ async function getAllTime(browser) {
       browser,
       period: "alltime",
       mode: "race",
-      playerName:
-        players.guilherme.name
+      player: players.guilherme
     });
 
 
@@ -909,59 +1136,27 @@ async function getAllTime(browser) {
       browser,
       period: "alltime",
       mode: "real",
-      playerName:
-        players.fantasma.name
+      player: players.fantasma
     });
-
-
-  const guilhermeTotal =
-    guilhermeReal +
-    guilhermeRace;
-
-
-  console.log(
-    "================================"
-  );
-
-  console.log(
-    "ALL-TIME ENCONTRADO"
-  );
-
-  console.log(
-    "Guilherme Real:",
-    guilhermeReal
-  );
-
-  console.log(
-    "Guilherme Race:",
-    guilhermeRace
-  );
-
-  console.log(
-    "Guilherme Real + Race:",
-    guilhermeTotal
-  );
-
-  console.log(
-    "Fantasma Real:",
-    fantasmaReal
-  );
-
-  console.log(
-    "================================"
-  );
 
 
   return {
 
     guilherme: {
-      km: guilhermeTotal,
-      mode: "Real + Race"
+      km:
+        guilhermeReal +
+        guilhermeRace,
+
+      mode:
+        "Real + Race"
     },
 
     fantasma: {
-      km: fantasmaReal,
-      mode: "Real"
+      km:
+        fantasmaReal,
+
+      mode:
+        "Real"
     }
 
   };
@@ -975,19 +1170,11 @@ async function getAllTime(browser) {
 async function refresh() {
 
   console.log(
-    "================================"
-  );
-
-  console.log(
     "ATUALIZANDO TRUCKERS DUEL"
   );
 
   console.log(
     new Date().toISOString()
-  );
-
-  console.log(
-    "================================"
   );
 
 
@@ -1024,15 +1211,11 @@ async function refresh() {
       );
 
 
-      /*
-       * Recupera último valor válido.
-       */
-
       let previous = null;
 
 
       if (
-        fs.existsSync(DATA)
+        fs.existsSync(DATA_FILE)
       ) {
 
         try {
@@ -1040,12 +1223,13 @@ async function refresh() {
           previous =
             JSON.parse(
               fs.readFileSync(
-                DATA,
+                DATA_FILE,
                 "utf8"
               )
             );
 
         } catch (_) {}
+
       }
 
 
@@ -1063,7 +1247,6 @@ async function refresh() {
             "Real + Race"
         },
 
-
         fantasma: {
           km:
             Number.isFinite(
@@ -1080,7 +1263,6 @@ async function refresh() {
 
     }
 
-
   } finally {
 
     await browser.close();
@@ -1088,23 +1270,19 @@ async function refresh() {
   }
 
 
-  /*
-   * HISTÓRICO
-   */
-
-  let oldHistory = [];
+  let history = [];
 
 
   if (
-    fs.existsSync(DATA)
+    fs.existsSync(DATA_FILE)
   ) {
 
     try {
 
-      const saved =
+      const old =
         JSON.parse(
           fs.readFileSync(
-            DATA,
+            DATA_FILE,
             "utf8"
           )
         );
@@ -1112,26 +1290,18 @@ async function refresh() {
 
       if (
         Array.isArray(
-          saved.history
+          old.history
         )
       ) {
 
-        oldHistory =
-          saved.history;
+        history =
+          old.history;
+
       }
 
     } catch (_) {}
+
   }
-
-
-  const now =
-    new Date().toISOString();
-
-
-  const history =
-    [
-      ...oldHistory.slice(-30)
-    ];
 
 
   if (
@@ -1144,18 +1314,26 @@ async function refresh() {
   ) {
 
     history.push({
-      at: now,
-      g: alltime.guilherme.km,
-      f: alltime.fantasma.km
+      at:
+        new Date().toISOString(),
+
+      g:
+        alltime.guilherme.km,
+
+      f:
+        alltime.fantasma.km
     });
 
+
+    history =
+      history.slice(-30);
   }
 
 
   const result = {
 
     updatedAt:
-      now,
+      new Date().toISOString(),
 
     monthLabel:
       getMonthLabel(),
@@ -1170,7 +1348,7 @@ async function refresh() {
 
 
   fs.writeFileSync(
-    DATA,
+    DATA_FILE,
     JSON.stringify(
       result,
       null,
@@ -1187,35 +1365,25 @@ async function refresh() {
 
 
   console.log(
-    "================================"
+    "======================================"
   );
 
   console.log(
-    "RESULTADO"
+    "RESULTADO FINAL"
   );
 
   console.log(
-    "Mensal Guilherme:",
-    monthly.guilherme.km
-  );
-
-  console.log(
-    "Mensal Fantasma:",
-    monthly.fantasma.km
-  );
-
-  console.log(
-    "All-time Guilherme:",
+    "Guilherme All-time:",
     alltime.guilherme.km
   );
 
   console.log(
-    "All-time Fantasma:",
+    "Fantasma All-time:",
     alltime.fantasma.km
   );
 
   console.log(
-    "================================"
+    "======================================"
   );
 
 
@@ -1244,13 +1412,16 @@ app.get(
       }
 
 
-      res.json(cache);
+      res.json(
+        cache
+      );
 
     } catch (error) {
 
       console.error(
         error
       );
+
 
       res.status(503).json({
         error:
@@ -1291,8 +1462,8 @@ app.listen(
   () => {
 
     console.log(
-      "Truckers Duel listening on " +
-      PORT
+      `Truckers Duel listening on ${PORT}`
     );
+
   }
 );
