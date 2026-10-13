@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.56.1-noble
+FROM mcr.microsoft.com/playwright:v1.64.0-noble
 WORKDIR /app
 COPY server/package.json ./server/package.json
 RUN cd server && npm install --omit=dev
