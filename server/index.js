@@ -55,5 +55,5 @@ async function refresh(){
   }
 }
 app.get("/api/stats",async(req,res)=>{try{if(!cache||Date.now()-cacheAt>CACHE_MS) await refresh();res.json(cache)}catch(e){res.status(503).json({error:e.message})}});
-app.get("*",(req,res)=>res.sendFile(path.join(__dirname,"../public/index.html")));
+app.get("/{*splat}",(req,res)=>res.sendFile(path.join(__dirname,"../public/index.html")));
 app.listen(PORT,()=>console.log("Truckers Duel listening on "+PORT));
