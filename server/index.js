@@ -14,6 +14,7 @@ const players = {
     id: 80613,
     name: "Guilherme BR"
   },
+
   fantasma: {
     id: 321853,
     name: "Fantasma MG"
@@ -29,33 +30,52 @@ let cacheAt = 0;
    ========================================================= */
 
 function parseKm(text) {
-  if (!text) return null;
 
-  const matches = String(text).match(
-    /([0-9][0-9\s.,'’]*)\s*km/gi
-  );
+  if (!text) {
+    return null;
+  }
+
+  const matches =
+    String(text).match(
+      /([0-9][0-9\s.,'’]*)\s*km/gi
+    );
 
   if (!matches || !matches.length) {
     return null;
   }
 
   for (const match of matches) {
-    const number = match
-      .replace(/km/i, "")
-      .replace(/[^\d]/g, "");
 
-    const value = Number(number);
+    const number =
+      match
+        .replace(/km/i, "")
+        .replace(/[^\d]/g, "");
 
-    if (Number.isFinite(value) && value > 0) {
+    const value =
+      Number(number);
+
+    if (
+      Number.isFinite(value) &&
+      value > 0
+    ) {
+
       return value;
+
     }
+
   }
 
   return null;
+
 }
 
 
+/* =========================================================
+   MÊS ATUAL
+   ========================================================= */
+
 function getMonthLabel() {
+
   return new Intl.DateTimeFormat(
     "pt-BR",
     {
@@ -65,30 +85,53 @@ function getMonthLabel() {
     }
   )
     .format(new Date())
-    .replace(/^./, x => x.toUpperCase());
+    .replace(
+      /^./,
+      x => x.toUpperCase()
+    );
+
 }
 
 
 /* =========================================================
-   CLICAR CONTROLE
+   CLICAR TEXTO
    ========================================================= */
 
-async function clickText(page, text) {
-  const locator = page.getByText(text, {
-    exact: true
-  });
+async function clickText(
+  page,
+  text
+) {
 
-  const count = await locator.count();
+  const locator =
+    page.getByText(
+      text,
+      {
+        exact: true
+      }
+    );
+
+  const count =
+    await locator.count();
 
   if (!count) {
     return false;
   }
 
-  for (let i = count - 1; i >= 0; i--) {
-    try {
-      const element = locator.nth(i);
+  for (
+    let i = count - 1;
+    i >= 0;
+    i--
+  ) {
 
-      if (await element.isVisible()) {
+    try {
+
+      const element =
+        locator.nth(i);
+
+      if (
+        await element.isVisible()
+      ) {
+
         await element.click();
 
         console.log(
@@ -96,19 +139,26 @@ async function clickText(page, text) {
         );
 
         return true;
+
       }
+
     } catch (_) {}
+
   }
 
   return false;
+
 }
 
 
 /* =========================================================
-   CLICAR MODO ETS2
+   CLICAR MODO
    ========================================================= */
 
-async function clickMode(page, mode) {
+async function clickMode(
+  page,
+  mode
+) {
 
   const buttons =
     page.getByRole(
@@ -148,6 +198,7 @@ async function clickMode(page, mode) {
         );
 
         return true;
+
       }
 
     } catch (_) {}
@@ -155,6 +206,7 @@ async function clickMode(page, mode) {
   }
 
   return false;
+
 }
 
 
@@ -162,9 +214,13 @@ async function clickMode(page, mode) {
    EXTRAIR KM
    ========================================================= */
 
-async function extractDistance(page) {
+async function extractDistance(
+  page
+) {
 
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(
+    3000
+  );
 
   const body =
     await page
@@ -207,7 +263,9 @@ async function extractDistance(page) {
       );
 
       return km;
+
     }
+
   }
 
 
@@ -224,7 +282,9 @@ async function extractDistance(page) {
 
   if (matches) {
 
-    for (const match of matches) {
+    for (
+      const match of matches
+    ) {
 
       const number =
         match
@@ -233,6 +293,7 @@ async function extractDistance(page) {
 
       const km =
         Number(number);
+
 
       /*
        * Ignora valores muito pequenos.
@@ -249,12 +310,16 @@ async function extractDistance(page) {
         );
 
         return km;
+
       }
+
     }
+
   }
 
 
   return null;
+
 }
 
 
@@ -324,6 +389,7 @@ async function readPlayerStats({
       {
         waitUntil:
           "domcontentloaded",
+
         timeout:
           60000
       }
@@ -336,6 +402,32 @@ async function readPlayerStats({
 
 
     /*
+     * PERÍODO
+     */
+
+    if (
+      period === "monthly"
+    ) {
+
+      const monthly =
+        await clickText(
+          page,
+          "Monthly"
+        );
+
+      console.log(
+        "MONTHLY:",
+        monthly
+      );
+
+      await page.waitForTimeout(
+        2000
+      );
+
+    }
+
+
+    /*
      * ALL-TIME
      */
 
@@ -343,20 +435,102 @@ async function readPlayerStats({
       period === "alltime"
     ) {
 
-      const allTime =
-        await clickText(
-          page,
-          "All-time"
-        );
+      const allTimeSelectors = [
+
+        'button:has-text("All-time")',
+
+        'a:has-text("All-time")',
+
+        '[role="button"]:has-text("All-time")',
+
+        'text=All-time'
+
+      ];
+
+      let allTimeClicked =
+        false;
+
+
+      for (
+        const selector
+        of allTimeSelectors
+      ) {
+
+        try {
+
+          const locator =
+            page.locator(
+              selector
+            );
+
+          const count =
+            await locator.count();
+
+          console.log(
+            `ALL-TIME selector ${selector}: ${count}`
+          );
+
+
+          for (
+            let i = 0;
+            i < count;
+            i++
+          ) {
+
+            const element =
+              locator.nth(i);
+
+            if (
+              await element.isVisible()
+            ) {
+
+              await element.click({
+                force: true
+              });
+
+              allTimeClicked =
+                true;
+
+              console.log(
+                `ALL-TIME CLICADO: ${selector}`
+              );
+
+              break;
+
+            }
+
+          }
+
+
+          if (
+            allTimeClicked
+          ) {
+
+            break;
+
+          }
+
+        } catch (error) {
+
+          console.log(
+            `Falhou selector ${selector}`
+          );
+
+        }
+
+      }
+
 
       console.log(
-        "ALL-TIME:",
-        allTime
+        "ALL-TIME CLICADO:",
+        allTimeClicked
       );
 
+
       await page.waitForTimeout(
-        3000
+        4000
       );
+
     }
 
 
@@ -371,6 +545,7 @@ async function readPlayerStats({
           ? "Race"
           : "Real"
       );
+
 
     console.log(
       "MODO SELECIONADO:",
@@ -402,12 +577,9 @@ async function readPlayerStats({
       );
 
       return km;
+
     }
 
-
-    /*
-     * NÃO ENCONTROU
-     */
 
     console.log(
       "======================================"
@@ -450,11 +622,13 @@ async function readPlayerStats({
       `KM não encontrado para ${player.name}`
     );
 
+
   } finally {
 
     await page.close();
 
   }
+
 }
 
 
@@ -462,83 +636,131 @@ async function readPlayerStats({
    MONTHLY
    ========================================================= */
 
-async function getMonthly() {
+async function getMonthly(
+  browser
+) {
+
+  console.log("");
+  console.log(
+    "######################################"
+  );
+
+  console.log(
+    "BUSCANDO MENSAL NO TRUCKERSBOOK"
+  );
+
+  console.log(
+    "######################################"
+  );
+
+
+  const guilhermeReal =
+    await readPlayerStats({
+      browser,
+
+      period:
+        "monthly",
+
+      mode:
+        "real",
+
+      player:
+        players.guilherme
+    });
+
+
+  const fantasmaReal =
+    await readPlayerStats({
+      browser,
+
+      period:
+        "monthly",
+
+      mode:
+        "real",
+
+      player:
+        players.fantasma
+    });
+
+
+  const fantasmaRace =
+    await readPlayerStats({
+      browser,
+
+      period:
+        "monthly",
+
+      mode:
+        "race",
+
+      player:
+        players.fantasma
+    });
+
 
   return {
 
     guilherme: {
-      km: 62849,
-      mode: "Real"
+
+      km:
+        guilhermeReal,
+
+      mode:
+        "Real"
+
     },
 
     fantasma: {
-      km: 32481,
-      mode: "Real + Race"
+
+      km:
+        fantasmaReal +
+        fantasmaRace,
+
+      mode:
+        "Real + Race"
+
     }
 
   };
 
 }
-
-
 /* =========================================================
    ALL-TIME
    ========================================================= */
 
 async function getAllTime(browser) {
 
-  console.log(
-    "######################################"
-  );
+  console.log("");
+  console.log("######################################");
+  console.log("BUSCANDO ALL-TIME");
+  console.log("######################################");
 
-  console.log(
-    "BUSCANDO ALL-TIME"
-  );
-
-  console.log(
-    "######################################"
-  );
-
-
-  /*
-   * GUILHERME REAL
-   */
 
   const guilhermeReal =
     await readPlayerStats({
       browser,
       period: "alltime",
       mode: "real",
-      player:
-        players.guilherme
+      player: players.guilherme
     });
 
-
-  /*
-   * GUILHERME RACE
-   */
 
   const guilhermeRace =
     await readPlayerStats({
       browser,
       period: "alltime",
       mode: "race",
-      player:
-        players.guilherme
+      player: players.guilherme
     });
 
-
-  /*
-   * FANTASMA REAL
-   */
 
   const fantasmaReal =
     await readPlayerStats({
       browser,
       period: "alltime",
       mode: "real",
-      player:
-        players.fantasma
+      player: players.fantasma
     });
 
 
@@ -568,11 +790,14 @@ async function getAllTime(browser) {
   };
 
 }
+
+
 /* =========================================================
    REFRESH
    ========================================================= */
 
 let refreshPromise = null;
+
 
 async function doRefresh() {
 
@@ -589,78 +814,237 @@ async function doRefresh() {
 
     browser =
       await chromium.launch({
+
         headless: true,
+
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
           "--disable-gpu"
         ]
+
       });
 
 
+    /*
+     * Busca os valores mensais diretamente
+     * do TrucksBook.
+     */
+
     const monthly =
-      await getMonthly();
-
-
-    let alltime;
-
-
-    try {
-
-      alltime =
-        await getAllTime(
-          browser
-        );
-
-    } catch (error) {
-
-      console.error(
-        "ERRO AO BUSCAR ALL-TIME:"
+      await getMonthly(
+        browser
       );
 
-      console.error(
-        error.message
-      );
+
+    /*
+     * Os valores All-time informados pelo usuário.
+     *
+     * Guilherme: 3.993.778
+     * Fantasma:  5.626.650
+     *
+     * Esses valores são a BASE.
+     */
+
+
+    const previous =
+      cache &&
+      cache.tracking
+        ? cache.tracking
+        : null;
+
+
+    const currentMonth =
+      getMonthLabel();
+
+
+    let tracking;
+
+
+    /*
+     * Se já temos uma leitura anterior
+     * no mesmo mês, calculamos somente
+     * a diferença.
+     */
+
+    if (
+
+      previous &&
+
+      previous.monthLabel ===
+        currentMonth &&
+
+      Number.isFinite(
+        previous.guilhermeMonthly
+      ) &&
+
+      Number.isFinite(
+        previous.fantasmaMonthly
+      ) &&
+
+      Number.isFinite(
+        previous.guilhermeAllTime
+      ) &&
+
+      Number.isFinite(
+        previous.fantasmaAllTime
+      )
+
+    ) {
+
+
+      let guilhermeDelta =
+        monthly.guilherme.km -
+        previous.guilhermeMonthly;
+
+
+      let fantasmaDelta =
+        monthly.fantasma.km -
+        previous.fantasmaMonthly;
 
 
       /*
-       * Se já existir informação anterior,
-       * mantém os dados antigos em vez
-       * de apagar o resultado da API.
+       * Nunca deixa o All-time diminuir.
        */
 
       if (
-        cache &&
-        cache.alltime
+        guilhermeDelta < 0
       ) {
 
-        console.log(
-          "Mantendo ALL-TIME anterior."
-        );
-
-        alltime =
-          cache.alltime;
-
-      } else {
-
-        alltime = {
-
-          guilherme: {
-            km: null,
-            mode: "Real + Race"
-          },
-
-          fantasma: {
-            km: null,
-            mode: "Real"
-          }
-
-        };
+        guilhermeDelta = 0;
 
       }
 
+
+      if (
+        fantasmaDelta < 0
+      ) {
+
+        fantasmaDelta = 0;
+
+      }
+
+
+      tracking = {
+
+        monthLabel:
+          currentMonth,
+
+
+        guilhermeMonthly:
+          monthly.guilherme.km,
+
+
+        fantasmaMonthly:
+          monthly.fantasma.km,
+
+
+        guilhermeAllTime:
+          previous.guilhermeAllTime +
+          guilhermeDelta,
+
+
+        fantasmaAllTime:
+          previous.fantasmaAllTime +
+          fantasmaDelta
+
+      };
+
+
+      console.log(
+        `GUILHERME DELTA: +${guilhermeDelta} km`
+      );
+
+
+      console.log(
+        `FANTASMA DELTA: +${fantasmaDelta} km`
+      );
+
+
+    } else {
+
+
+      /*
+       * PRIMEIRA EXECUÇÃO
+       *
+       * Não soma o mensal atual.
+       * Apenas cria o baseline.
+       */
+
+      tracking = {
+
+        monthLabel:
+          currentMonth,
+
+
+        guilhermeMonthly:
+          monthly.guilherme.km,
+
+
+        fantasmaMonthly:
+          monthly.fantasma.km,
+
+
+        guilhermeAllTime:
+          previous &&
+          Number.isFinite(
+            previous.guilhermeAllTime
+          )
+
+            ? previous.guilhermeAllTime
+
+            : 3993778,
+
+
+        fantasmaAllTime:
+          previous &&
+          Number.isFinite(
+            previous.fantasmaAllTime
+          )
+
+            ? previous.fantasmaAllTime
+
+            : 5626650
+
+      };
+
+
+      console.log(
+        "BASELINE CRIADO."
+      );
+
+      console.log(
+        "Nenhum km foi somado nesta leitura."
+      );
+
     }
+
+
+    const alltime = {
+
+      guilherme: {
+
+        km:
+          tracking.guilhermeAllTime,
+
+        mode:
+          "Real + Race"
+
+      },
+
+
+      fantasma: {
+
+        km:
+          tracking.fantasmaAllTime,
+
+        mode:
+          "Real"
+
+      }
+
+    };
 
 
     const result = {
@@ -668,24 +1052,35 @@ async function doRefresh() {
       updatedAt:
         new Date().toISOString(),
 
+
       monthLabel:
-        getMonthLabel(),
+        currentMonth,
+
 
       monthly,
 
+
       alltime,
+
+
+      tracking,
+
 
       history:
         cache &&
-        Array.isArray(cache.history)
+        Array.isArray(
+          cache.history
+        )
+
           ? cache.history
+
           : []
 
     };
 
 
     /*
-     * Adiciona histórico.
+     * Histórico.
      */
 
     result.history.push({
@@ -693,17 +1088,19 @@ async function doRefresh() {
       date:
         result.updatedAt,
 
+
       guilherme:
-        result.monthly.guilherme.km,
+        result.alltime.guilherme.km,
+
 
       fantasma:
-        result.monthly.fantasma.km
+        result.alltime.fantasma.km
 
     });
 
 
     /*
-     * Limita histórico.
+     * Máximo de 100 registros.
      */
 
     if (
@@ -711,7 +1108,9 @@ async function doRefresh() {
     ) {
 
       result.history =
-        result.history.slice(-100);
+        result.history.slice(
+          -100
+        );
 
     }
 
@@ -719,29 +1118,36 @@ async function doRefresh() {
     cache =
       result;
 
+
     cacheAt =
       Date.now();
 
 
     /*
-     * Salva no data.json
+     * Salva no data.json.
      */
 
     try {
 
       fs.writeFileSync(
+
         DATA_FILE,
+
         JSON.stringify(
           result,
           null,
           2
         ),
+
         "utf8"
+
       );
+
 
       console.log(
         "data.json atualizado."
       );
+
 
     } catch (error) {
 
@@ -757,9 +1163,11 @@ async function doRefresh() {
     console.log(
       "======================================"
     );
+
     console.log(
       "ATUALIZAÇÃO CONCLUÍDA"
     );
+
     console.log(
       "======================================"
     );
@@ -778,6 +1186,7 @@ async function doRefresh() {
 
 
   } finally {
+
 
     if (browser) {
 
@@ -802,9 +1211,9 @@ async function refresh(
   force = false
 ) {
 
+
   /*
-   * Se já existe uma atualização em andamento,
-   * não abre outro Chromium.
+   * Impede duas atualizações simultâneas.
    */
 
   if (refreshPromise) {
@@ -819,13 +1228,19 @@ async function refresh(
 
 
   /*
-   * Usa cache se ainda estiver válido.
+   * Cache.
    */
 
   if (
+
     !force &&
+
     cache &&
-    Date.now() - cacheAt < CACHE_MS
+
+    Date.now() -
+      cacheAt <
+      CACHE_MS
+
   ) {
 
     console.log(
@@ -863,6 +1278,7 @@ function loadCache() {
 
   try {
 
+
     if (
       !fs.existsSync(
         DATA_FILE
@@ -882,29 +1298,36 @@ function loadCache() {
 
 
     const data =
-      JSON.parse(text);
+      JSON.parse(
+        text
+      );
 
 
     if (
       data &&
-      typeof data === "object"
+      typeof data ===
+        "object"
     ) {
 
       cache =
         data;
 
+
       /*
-       * Não considera o arquivo antigo
-       * como cache fresco.
+       * O arquivo não é considerado
+       * cache fresco.
        */
 
-      cacheAt = 0;
+      cacheAt =
+        0;
+
 
       console.log(
         "Cache inicial carregado."
       );
 
     }
+
 
   } catch (error) {
 
@@ -916,8 +1339,6 @@ function loadCache() {
   }
 
 }
-
-
 /* =========================================================
    API
    ========================================================= */
@@ -934,10 +1355,15 @@ app.get(
 
 
       const data =
-        await refresh(force);
+        await refresh(
+          force
+        );
 
 
-      res.json(data);
+      res.json(
+        data
+      );
+
 
     } catch (error) {
 
@@ -946,10 +1372,6 @@ app.get(
         error
       );
 
-
-      /*
-       * Se houver cache, devolve o cache.
-       */
 
       if (cache) {
 
@@ -987,10 +1409,15 @@ app.get(
     try {
 
       const data =
-        await refresh(true);
+        await refresh(
+          true
+        );
 
 
-      res.json(data);
+      res.json(
+        data
+      );
+
 
     } catch (error) {
 
@@ -1017,7 +1444,7 @@ app.get(
 
 
 /* =========================================================
-   HEALTH CHECK
+   HEALTH
    ========================================================= */
 
 app.get(
@@ -1026,7 +1453,8 @@ app.get(
 
     res.json({
 
-      ok: true,
+      ok:
+        true,
 
       service:
         "truckers-duel",
@@ -1056,7 +1484,7 @@ app.use(
 
 
 /* =========================================================
-   FALLBACK
+   FALLBACK EXPRESS 5
    ========================================================= */
 
 app.get(
@@ -1106,4 +1534,51 @@ app.listen(
     );
 
   }
+);
+
+
+/* =========================================================
+   ATUALIZAÇÃO AUTOMÁTICA — 5 MINUTOS
+   ========================================================= */
+
+const AUTO_REFRESH_MS =
+  5 * 60 * 1000;
+
+
+setInterval(
+  async () => {
+
+    try {
+
+      console.log("");
+      console.log(
+        "======================================"
+      );
+
+      console.log(
+        "ATUALIZAÇÃO AUTOMÁTICA — 5 MINUTOS"
+      );
+
+      console.log(
+        "======================================"
+      );
+
+
+      await refresh(
+        true
+      );
+
+
+    } catch (error) {
+
+      console.error(
+        "Erro na atualização automática:",
+        error.message
+      );
+
+    }
+
+  },
+
+  AUTO_REFRESH_MS
 );
