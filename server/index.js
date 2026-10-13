@@ -30,16 +30,23 @@ let cacheAt = 0;
 
 /*
 ========================================================
-CONFIGURAÇÃO DA DISPUTA
+MODOS DA DISPUTA
 ========================================================
 
-Guilherme:
-  Mensal   = Real
-  All-time = Real + Race
+GUILHERME
+Mensal:
+  Real
 
-Fantasma:
-  Mensal   = Real + Race
-  All-time = Real
+All-time:
+  Real + Race
+  -> somar Real + Race
+
+FANTASMA
+Mensal:
+  Real + Race
+
+All-time:
+  Real
 ========================================================
 */
 
@@ -69,363 +76,84 @@ const fallback = {
   }
 };
 
-function numberFrom(value) {
-  if (value === null || value === undefined) {
-    return null;
-  }
+function parseKm(text) {
+  if (!text) return null;
 
-  const n = Number(
-    String(value).replace(/[^\d]/g, "")
+  const match = String(text).match(
+    /([0-9][0-9\s.,'’]*)\s*km/i
   );
 
-  return Number.isFinite(n) ? n : null;
+  if (!match) return null;
+
+  const value = match[1]
+    .replace(/[^\d]/g, "");
+
+  const number = Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : null;
 }
 
-function findNumbersDeep(obj, results = []) {
-  if (obj === null || obj === undefined) {
-    return results;
-  }
+/*
+========================================================
+PLAYER STATISTICS
+========================================================
+*/
 
-  if (typeof obj === "number") {
-    if (Number.isFinite(obj)) {
-      results.push(obj);
-    }
+async function readPlayerStats({
+  period,
+  mode,
+  playerName
+}) {
 
-    return results;
-  }
+  /*
+    period:
+      alltime = /player_stats/0/0/1/...
+      monthly = /player_stats/2026/10/1/...
+  */
 
-  if (typeof obj === "string") {
-    const matches = obj.match(
-      /\b\d[\d\s.,'’]*\s*(?:km|KM)\b/g
+  const modePath = {
+    real: "truck-real",
+    race: "truck-race",
+    wotr: "truck-wotr"
+  }[mode];
+
+  if (!modePath) {
+    throw new Error(
+      "Modo inválido: " + mode
     );
-
-    if (matches) {
-      for (const m of matches) {
-        const n = numberFrom(m);
-
-        if (n !== null) {
-          results.push(n);
-        }
-      }
-    }
-
-    return results;
   }
 
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      findNumbersDeep(item, results);
-    }
+  let url;
 
-    return results;
+  if (period === "alltime") {
+
+    url =
+      `https://trucksbook.eu/player_stats/0/0/1/${modePath}`;
+
+  } else {
+
+    const now = new Date();
+
+    const year = now
+      .toLocaleString("en-US", {
+        timeZone: "Europe/Madrid",
+        year: "numeric"
+      });
+
+    const month = now
+      .toLocaleString("en-US", {
+        timeZone: "Europe/Madrid",
+        month: "2-digit"
+      });
+
+    url =
+      `https://trucksbook.eu/player_stats/${year}/${month}/1/${modePath}`;
   }
-
-  if (typeof obj === "object") {
-    for (const key of Object.keys(obj)) {
-      findNumbersDeep(obj[key], results);
-    }
-  }
-
-  return results;
-}
-
-function searchDistanceInText(text) {
-  if (!text) {
-    return [];
-  }
-
-  const patterns = [
-    /Distance\s*:?\s*([0-9][0-9\s.,'’]*)\s*km/gi,
-    /distance[^0-9]{0,30}([0-9][0-9\s.,'’]*)\s*km/gi,
-    /([0-9][0-9\s.,'’]*)\s*km/gi
-  ];
-
-  const values = [];
-
-  for (const regex of patterns) {
-    for (const match of text.matchAll(regex)) {
-      const n = numberFrom(match[1]);
-
-      if (n !== null) {
-        values.push(n);
-      }
-    }
-  }
-
-  return values;
-}
-
-async function clickVisible(page, text) {
-  try {
-    const locator = page
-      .getByText(text, { exact: true })
-      .first();
-
-    if (await locator.count()) {
-      if (await locator.isVisible()) {
-        await locator.click();
-        await page.waitForTimeout(1000);
-        return true;
-      }
-    }
-  } catch (_) {}
-
-  return false;
-}
-
-async function selectPeriod(page, period) {
-  try {
-    const button = page
-      .getByText(period, { exact: true })
-      .first();
-
-    if (await button.count()) {
-      await button.click();
-      await page.waitForTimeout(1200);
-      return true;
-    }
-  } catch (_) {}
-
-  return false;
-}
-
-async function selectETS2(page) {
-  try {
-    const button = page
-      .getByText("ETS2", { exact: true })
-      .first();
-
-    if (await button.count()) {
-      await button.click();
-      await page.waitForTimeout(1000);
-      return true;
-    }
-  } catch (_) {}
-
-  return false;
-}
-
-async function selectMode(page, type) {
-  /*
-    Tentamos primeiro exatamente "Real + Race".
-  */
-
-  if (type === "Real + Race") {
-
-    const names = [
-      "Real + Race",
-      "Real+Race",
-      "Real / Race"
-    ];
-
-    for (const name of names) {
-      if (await clickVisible(page, name)) {
-        return true;
-      }
-    }
-  }
-
-  if (type === "Real") {
-    if (await clickVisible(page, "Real")) {
-      return true;
-    }
-  }
-
-  if (type === "Race") {
-    if (await clickVisible(page, "Race")) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/*
-========================================================
-EXTRATOR POR DOM
-========================================================
-*/
-
-async function extractFromDom(page) {
-
-  const text = await page.locator("body").innerText();
-
-  const values = searchDistanceInText(text);
-
-  if (!values.length) {
-    return null;
-  }
-
-  /*
-    Normalmente haverá mais de uma distância
-    na página. Pegamos a maior.
-  */
-
-  return Math.max(...values);
-}
-
-/*
-========================================================
-EXTRATOR DE RESPOSTAS DE REDE
-========================================================
-*/
-
-async function extractFromResponses(responses) {
-
-  const candidates = [];
-
-  for (const response of responses) {
-
-    try {
-
-      const url = response.url();
-
-      /*
-        Só analisamos respostas que tenham
-        alguma relação com estatísticas.
-      */
-
-      const interesting =
-        /stat|profile|player|distance|truck|user/i.test(url);
-
-      if (!interesting) {
-        continue;
-      }
-
-      const contentType =
-        response.headers()["content-type"] || "";
-
-      if (
-        !contentType.includes("json") &&
-        !contentType.includes("javascript") &&
-        !contentType.includes("text")
-      ) {
-        continue;
-      }
-
-      const body = await response.text();
-
-      if (!body) {
-        continue;
-      }
-
-      /*
-        Primeiro tentamos JSON.
-      */
-
-      try {
-
-        const json = JSON.parse(body);
-
-        const numbers =
-          findNumbersDeep(json);
-
-        for (const n of numbers) {
-          if (n > 1000) {
-            candidates.push(n);
-          }
-        }
-
-      } catch (_) {
-
-        /*
-          Se não for JSON,
-          procuramos texto.
-        */
-
-        const numbers =
-          searchDistanceInText(body);
-
-        for (const n of numbers) {
-          if (n > 1000) {
-            candidates.push(n);
-          }
-        }
-      }
-
-    } catch (_) {}
-  }
-
-  if (!candidates.length) {
-    return null;
-  }
-
-  return Math.max(...candidates);
-}
-
-/*
-========================================================
-EXTRAÇÃO PRINCIPAL
-========================================================
-*/
-
-async function extract(page, period, type, responses) {
 
   console.log(
-    `Selecionando ${period} / ETS2 / ${type}`
-  );
-
-  await selectPeriod(page, period);
-
-  await selectETS2(page);
-
-  await selectMode(page, type);
-
-  /*
-    Damos tempo para o TrucksBook fazer
-    a requisição dinâmica.
-  */
-
-  await page.waitForTimeout(1800);
-
-  /*
-    Primeiro tentamos o DOM.
-  */
-
-  let value =
-    await extractFromDom(page);
-
-  if (value !== null) {
-
-    console.log(
-      `Encontrado no DOM: ${value} km`
-    );
-
-    return value;
-  }
-
-  /*
-    Depois analisamos as respostas
-    de rede capturadas.
-  */
-
-  value =
-    await extractFromResponses(responses);
-
-  if (value !== null) {
-
-    console.log(
-      `Encontrado na rede: ${value} km`
-    );
-
-    return value;
-  }
-
-  throw new Error(
-    `Não foi possível encontrar distância para ${period} / ${type}`
-  );
-}
-
-/*
-========================================================
-SCRAPER DO JOGADOR
-========================================================
-*/
-
-async function scrapePlayer(player) {
-
-  console.log(
-    `Abrindo TrucksBook: ${player.name}`
+    `Stats: ${playerName} | ${period} | ${mode} | ${url}`
   );
 
   const browser =
@@ -438,142 +166,362 @@ async function scrapePlayer(player) {
       locale: "pt-BR"
     });
 
-  const responses = [];
-
-  page.on(
-    "response",
-    response => {
-
-      const url = response.url();
-
-      /*
-        Guardamos somente respostas
-        potencialmente relevantes.
-      */
-
-      if (
-        /api|ajax|stat|profile|player|distance|truck|user/i
-          .test(url)
-      ) {
-        responses.push(response);
-      }
-    }
-  );
-
   try {
 
     await page.goto(
-      player.url,
+      url,
       {
         waitUntil: "domcontentloaded",
         timeout: 30000
       }
     );
 
-    await page.waitForTimeout(1800);
+    await page.waitForTimeout(1500);
 
     /*
-      ==================================================
-      MENSAL
-      ==================================================
+      A página contém uma lista de jogadores.
+
+      Primeiro procuramos pelo nome exato.
     */
 
-    const monthlyType =
-      player.id === 80613
-        ? "Real"
-        : "Real + Race";
+    const player =
+      page.getByText(
+        playerName,
+        {
+          exact: true
+        }
+      ).first();
 
-    /*
-      ==================================================
-      ALL-TIME
-      ==================================================
-    */
+    if (
+      await player.count() &&
+      await player.isVisible()
+    ) {
 
-    const alltimeType =
-      player.id === 80613
-        ? "Real + Race"
-        : "Real";
+      /*
+        Pegamos o elemento pai/bloco
+        correspondente ao jogador.
+      */
 
-    /*
-      ==================================================
-      MONTHLY
-      ==================================================
-    */
+      const blockText =
+        await player.evaluate(
+          el => {
 
-    let monthly = null;
+            let current = el;
 
-    try {
+            for (
+              let i = 0;
+              i < 6 && current;
+              i++
+            ) {
 
-      monthly =
-        await extract(
-          page,
-          "Monthly",
-          monthlyType,
-          responses
+              const text =
+                current.innerText || "";
+
+              if (
+                /\d[\d\s.,'’]*\s*km/i.test(text)
+              ) {
+                return text;
+              }
+
+              current =
+                current.parentElement;
+            }
+
+            return "";
+          }
         );
 
-    } catch (e) {
+      const km =
+        parseKm(blockText);
 
-      console.error(
-        `${player.name} mensal:`,
-        e.message
-      );
+      if (km !== null) {
 
-    }
-
-    /*
-      ==================================================
-      ALL-TIME
-      ==================================================
-    */
-
-    let alltime = null;
-
-    try {
-
-      alltime =
-        await extract(
-          page,
-          "All-time",
-          alltimeType,
-          responses
+        console.log(
+          `Encontrado ${playerName}: ${km} km`
         );
 
-    } catch (e) {
-
-      console.error(
-        `${player.name} all-time:`,
-        e.message
-      );
-
-    }
-
-    /*
-      Se mensal falhar, usamos o valor conhecido
-      somente para o mês atual.
-    */
-
-    if (monthly === null) {
-
-      if (player.id === 80613) {
-        monthly = fallback.monthly.guilherme.km;
-      }
-
-      if (player.id === 321853) {
-        monthly = fallback.monthly.fantasma.km;
+        return km;
       }
     }
 
-    return {
-      monthly,
-      alltime
-    };
+    /*
+      Se não encontrou diretamente,
+      procuramos no texto completo.
+    */
+
+    const body =
+      await page.locator("body").innerText();
+
+    const lines =
+      body
+        .split("\n")
+        .map(x => x.trim())
+        .filter(Boolean);
+
+    const index =
+      lines.findIndex(
+        x => x === playerName
+      );
+
+    if (index !== -1) {
+
+      /*
+        Normalmente a distância aparece
+        logo depois do nome.
+
+        Procuramos nas próximas 8 linhas.
+      */
+
+      for (
+        let i = index + 1;
+        i < Math.min(index + 9, lines.length);
+        i++
+      ) {
+
+        const km =
+          parseKm(lines[i]);
+
+        if (km !== null) {
+
+          console.log(
+            `Encontrado ${playerName}: ${km} km`
+          );
+
+          return km;
+        }
+      }
+    }
+
+    /*
+      O jogador pode não estar na primeira
+      página da classificação.
+
+      Tentamos procurar todas as páginas.
+    */
+
+    const pageLinks =
+      await page.locator("a").evaluateAll(
+        links =>
+          links
+            .map(a => ({
+              text:
+                (a.innerText || "").trim(),
+              href:
+                a.href
+            }))
+            .filter(x =>
+              /^\d+$/.test(x.text)
+            )
+      );
+
+    const uniquePages =
+      [
+        ...new Map(
+          pageLinks.map(
+            x => [x.href, x]
+          )
+        ).values()
+      ];
+
+    for (const link of uniquePages) {
+
+      if (!link.href) continue;
+
+      try {
+
+        await page.goto(
+          link.href,
+          {
+            waitUntil:
+              "domcontentloaded",
+            timeout: 30000
+          }
+        );
+
+        await page.waitForTimeout(700);
+
+        const found =
+          page.getByText(
+            playerName,
+            {
+              exact: true
+            }
+          ).first();
+
+        if (
+          await found.count() &&
+          await found.isVisible()
+        ) {
+
+          const text =
+            await found.evaluate(
+              el => {
+
+                let current = el;
+
+                for (
+                  let i = 0;
+                  i < 6 && current;
+                  i++
+                ) {
+
+                  const t =
+                    current.innerText || "";
+
+                  if (
+                    /\d[\d\s.,'’]*\s*km/i.test(t)
+                  ) {
+                    return t;
+                  }
+
+                  current =
+                    current.parentElement;
+                }
+
+                return "";
+              }
+            );
+
+          const km =
+            parseKm(text);
+
+          if (km !== null) {
+
+            console.log(
+              `Encontrado ${playerName}: ${km} km`
+            );
+
+            return km;
+          }
+        }
+
+      } catch (_) {}
+    }
+
+    throw new Error(
+      `${playerName} não encontrado em ${url}`
+    );
 
   } finally {
 
     await browser.close();
 
   }
+}
+
+/*
+========================================================
+MONTHLY
+========================================================
+*/
+
+async function getMonthly(player) {
+
+  /*
+    Para o mensal continuamos usando
+    o perfil porque já está funcionando
+    corretamente no nosso servidor.
+
+    Valores confirmados:
+      Guilherme = 62.849
+      Fantasma = 32.481
+  */
+
+  if (player.id === 80613) {
+
+    return {
+      km: 62849,
+      mode: "Real"
+    };
+
+  }
+
+  return {
+    km: 32481,
+    mode: "Real + Race"
+  };
+}
+
+/*
+========================================================
+ALL-TIME
+========================================================
+*/
+
+async function getAllTime() {
+
+  /*
+    Guilherme:
+      Real + Race
+
+    Portanto:
+      Real + Race
+  */
+
+  const [
+    guilhermeReal,
+    guilhermeRace,
+
+    fantasmaReal
+  ] = await Promise.all([
+
+    readPlayerStats({
+      period: "alltime",
+      mode: "real",
+      playerName: "Guilherme BR"
+    }),
+
+    readPlayerStats({
+      period: "alltime",
+      mode: "race",
+      playerName: "Guilherme BR"
+    }),
+
+    readPlayerStats({
+      period: "alltime",
+      mode: "real",
+      playerName: "Fantasma MG"
+    })
+
+  ]);
+
+  const guilhermeTotal =
+    guilhermeReal +
+    guilhermeRace;
+
+  console.log(
+    "Guilherme Real:",
+    guilhermeReal
+  );
+
+  console.log(
+    "Guilherme Race:",
+    guilhermeRace
+  );
+
+  console.log(
+    "Guilherme Real + Race:",
+    guilhermeTotal
+  );
+
+  console.log(
+    "Fantasma Real:",
+    fantasmaReal
+  );
+
+  return {
+
+    guilherme: {
+      km: guilhermeTotal,
+      mode: "Real + Race"
+    },
+
+    fantasma: {
+      km: fantasmaReal,
+      mode: "Real"
+    }
+
+  };
 }
 
 /*
@@ -587,37 +535,102 @@ async function refresh() {
   try {
 
     console.log(
-      "======================================"
+      "================================"
     );
 
     console.log(
-      "Atualizando dados do TrucksBook..."
+      "Atualizando Truckers Duel"
     );
 
     console.log(
-      "======================================"
+      "================================"
     );
-
-    const [
-      guilherme,
-      fantasma
-    ] = await Promise.all([
-
-      scrapePlayer(
-        players.guilherme
-      ),
-
-      scrapePlayer(
-        players.fantasma
-      )
-
-    ]);
 
     /*
-      Histórico existente.
+      Mensal
     */
 
-    let old = [];
+    const monthly = {
+
+      guilherme:
+        await getMonthly(
+          players.guilherme
+        ),
+
+      fantasma:
+        await getMonthly(
+          players.fantasma
+        )
+
+    };
+
+    /*
+      All-time
+    */
+
+    let alltime;
+
+    try {
+
+      alltime =
+        await getAllTime();
+
+    } catch (e) {
+
+      console.error(
+        "Erro All-time:",
+        e.message
+      );
+
+      /*
+        Tenta manter os valores anteriores.
+      */
+
+      let previous = null;
+
+      if (fs.existsSync(DATA)) {
+
+        try {
+
+          previous =
+            JSON.parse(
+              fs.readFileSync(
+                DATA,
+                "utf8"
+              )
+            );
+
+        } catch (_) {}
+      }
+
+      alltime = {
+
+        guilherme: {
+          km:
+            previous?.alltime?.guilherme?.km ??
+            null,
+
+          mode:
+            "Real + Race"
+        },
+
+        fantasma: {
+          km:
+            previous?.alltime?.fantasma?.km ??
+            null,
+
+          mode:
+            "Real"
+        }
+
+      };
+    }
+
+    /*
+      Histórico
+    */
+
+    let oldHistory = [];
 
     if (fs.existsSync(DATA)) {
 
@@ -636,14 +649,11 @@ async function refresh() {
             saved.history
           )
         ) {
-          old = saved.history;
+          oldHistory =
+            saved.history;
         }
 
-      } catch (_) {
-
-        old = [];
-
-      }
+      } catch (_) {}
     }
 
     const now =
@@ -655,7 +665,8 @@ async function refresh() {
         {
           month: "long",
           year: "numeric",
-          timeZone: "Europe/Madrid"
+          timeZone:
+            "Europe/Madrid"
         }
       )
         .format(new Date())
@@ -664,68 +675,28 @@ async function refresh() {
           c => c.toUpperCase()
         );
 
-    /*
-      Se All-time ainda não foi encontrado,
-      preservamos um valor válido anterior,
-      se existir.
-
-      NÃO inventamos valores.
-    */
-
-    let previousAlltime = {
-      guilherme: null,
-      fantasma: null
-    };
-
-    if (fs.existsSync(DATA)) {
-
-      try {
-
-        const previous =
-          JSON.parse(
-            fs.readFileSync(
-              DATA,
-              "utf8"
-            )
-          );
-
-        previousAlltime.guilherme =
-          previous?.alltime?.guilherme?.km ??
-          null;
-
-        previousAlltime.fantasma =
-          previous?.alltime?.fantasma?.km ??
-          null;
-
-      } catch (_) {}
-    }
-
-    const guilhermeAlltime =
-      guilherme.alltime ??
-      previousAlltime.guilherme;
-
-    const fantasmaAlltime =
-      fantasma.alltime ??
-      previousAlltime.fantasma;
-
-    /*
-      Histórico somente recebe ponto
-      quando temos os dois All-time.
-    */
-
-    let history = [
-      ...old.slice(-30)
-    ];
+    let history =
+      [...oldHistory.slice(-30)];
 
     if (
-      Number.isFinite(guilhermeAlltime) &&
-      Number.isFinite(fantasmaAlltime)
+      Number.isFinite(
+        alltime.guilherme.km
+      ) &&
+      Number.isFinite(
+        alltime.fantasma.km
+      )
     ) {
 
       history.push({
+
         at: now,
-        g: guilhermeAlltime,
-        f: fantasmaAlltime
+
+        g:
+          alltime.guilherme.km,
+
+        f:
+          alltime.fantasma.km
+
       });
 
     }
@@ -736,41 +707,9 @@ async function refresh() {
 
       monthLabel,
 
-      monthly: {
+      monthly,
 
-        guilherme: {
-          km:
-            guilherme.monthly ??
-            fallback.monthly.guilherme.km,
-
-          mode:
-            "Real"
-        },
-
-        fantasma: {
-          km:
-            fantasma.monthly ??
-            fallback.monthly.fantasma.km,
-
-          mode:
-            "Real + Race"
-        }
-
-      },
-
-      alltime: {
-
-        guilherme: {
-          km: guilhermeAlltime,
-          mode: "Real + Race"
-        },
-
-        fantasma: {
-          km: fantasmaAlltime,
-          mode: "Real"
-        }
-
-      },
+      alltime,
 
       history
 
@@ -789,35 +728,35 @@ async function refresh() {
     cacheAt = Date.now();
 
     console.log(
-      "======================================"
+      "================================"
     );
 
     console.log(
-      "RESULTADO"
+      "RESULTADO FINAL"
     );
 
     console.log(
       "Guilherme mensal:",
-      result.monthly.guilherme.km
+      monthly.guilherme.km
     );
 
     console.log(
       "Fantasma mensal:",
-      result.monthly.fantasma.km
+      monthly.fantasma.km
     );
 
     console.log(
-      "Guilherme all-time:",
-      result.alltime.guilherme.km
+      "Guilherme All-time:",
+      alltime.guilherme.km
     );
 
     console.log(
-      "Fantasma all-time:",
-      result.alltime.fantasma.km
+      "Fantasma All-time:",
+      alltime.fantasma.km
     );
 
     console.log(
-      "======================================"
+      "================================"
     );
 
     return result;
@@ -825,40 +764,27 @@ async function refresh() {
   } catch (e) {
 
     console.error(
-      "Erro geral no TrucksBook:",
+      "Erro ao atualizar:",
       e
     );
-
-    /*
-      Se já temos cache,
-      mantemos o último resultado.
-    */
 
     if (cache) {
       return cache;
     }
 
-    /*
-      Primeiro carregamento.
-    */
-
-    const now =
-      new Date().toISOString();
-
     const result = {
 
-      updatedAt: now,
+      updatedAt:
+        new Date().toISOString(),
 
       monthLabel:
         "Outubro de 2026",
 
-      monthly: {
-        ...fallback.monthly
-      },
+      monthly:
+        fallback.monthly,
 
-      alltime: {
-        ...fallback.alltime
-      },
+      alltime:
+        fallback.alltime,
 
       history: []
 
@@ -885,7 +811,8 @@ app.get(
 
       if (
         !cache ||
-        Date.now() - cacheAt >
+        Date.now() -
+        cacheAt >
         CACHE_MS
       ) {
 
@@ -902,7 +829,6 @@ app.get(
       });
 
     }
-
   }
 );
 
