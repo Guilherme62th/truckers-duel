@@ -51,7 +51,9 @@ async function refresh(){
     if(fs.existsSync(DATA)){cache=JSON.parse(fs.readFileSync(DATA,"utf8"));return cache}
     const now=new Date().toISOString();
     const result={updatedAt:now,monthLabel:"Outubro 2026",...fallback,history:[]};
-    return result;
+cache=result;
+cacheAt=Date.now();
+return result;
   }
 }
 app.get("/api/stats",async(req,res)=>{try{if(!cache||Date.now()-cacheAt>CACHE_MS) await refresh();res.json(cache)}catch(e){res.status(503).json({error:e.message})}});
