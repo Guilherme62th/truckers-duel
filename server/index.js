@@ -16,7 +16,6 @@ const players = {
     id: 80613,
     name: "Guilherme BR"
   },
-
   fantasma: {
     id: 321853,
     name: "Fantasma MG"
@@ -65,15 +64,9 @@ function getMonthParts() {
 
   const parts = formatter.formatToParts(now);
 
-  const year =
-    parts.find(p => p.type === "year")?.value;
-
-  const month =
-    parts.find(p => p.type === "month")?.value;
-
   return {
-    year,
-    month
+    year: parts.find(p => p.type === "year")?.value,
+    month: parts.find(p => p.type === "month")?.value
   };
 }
 
@@ -88,36 +81,143 @@ function getMonthLabel() {
     }
   )
     .format(new Date())
-    .replace(
-      /^./,
-      c => c.toUpperCase()
-    );
+    .replace(/^./, c => c.toUpperCase());
 }
 
 
 /* =========================================================
-   ENCONTRAR KM DE UM JOGADOR NA PÁGINA
+   EXTRAI DADOS DA PÁGINA
 ========================================================= */
 
-async function extractPlayerKm(page, playerName) {
+async function inspectPage(page, playerName) {
+
+  console.log(
+    "ANALISANDO ESTRUTURA DO TRUCKERSBOOK..."
+  );
+
+  const info = await page.evaluate(() => {
+
+    const forms = Array.from(
+      document.querySelectorAll("form")
+    ).map((form, index) => ({
+      index,
+      action: form.action,
+      method: form.method,
+      id: form.id,
+      name: form.getAttribute("name") || "",
+      text: (form.innerText || "").slice(0, 1000)
+    }));
+
+
+    const selects = Array.from(
+      document.querySelectorAll("select")
+    ).map((select, index) => ({
+      index,
+      name: select.name || "",
+      id: select.id || "",
+      value: select.value || "",
+      options: Array.from(select.options).map(option => ({
+        text: (option.textContent || "").trim(),
+        value: option.value
+      }))
+    }));
+
+
+    const buttons = Array.from(
+      document.querySelectorAll(
+        "button, input[type=submit], input[type=button]"
+      )
+    ).map((button, index) => ({
+      index,
+      tag: button.tagName,
+      type: button.getAttribute("type") || "",
+      name: button.getAttribute("name") || "",
+      value: button.getAttribute("value") || "",
+      text:
+        (
+          button.innerText ||
+          button.value ||
+          ""
+        ).trim()
+    }));
+
+
+    return {
+      url: location.href,
+      title: document.title,
+      forms,
+      selects,
+      buttons
+    };
+
+  });
+
+
+  console.log(
+    "===== FORMS ====="
+  );
+
+  console.log(
+    JSON.stringify(
+      info.forms,
+      null,
+      2
+    )
+  );
+
+
+  console.log(
+    "===== SELECTS ====="
+  );
+
+  console.log(
+    JSON.stringify(
+      info.selects,
+      null,
+      2
+    )
+  );
+
+
+  console.log(
+    "===== BUTTONS ====="
+  );
+
+  console.log(
+    JSON.stringify(
+      info.buttons,
+      null,
+      2
+    )
+  );
+
 
   /*
-   * Primeiro tenta encontrar o link do jogador.
+   * Procuramos o jogador diretamente no HTML.
    */
-  const playerLink =
-    page.getByRole("link", {
-      name: playerName,
-      exact: true
-    }).first();
 
-  if (
-    await playerLink.count() > 0
-  ) {
+  const foundPlayer =
+    await page.evaluate(
+      (name) => {
 
-    const result =
-      await playerLink.evaluate(el => {
+        const elements =
+          Array.from(
+            document.querySelectorAll("*")
+          );
 
-        let current = el;
+        const element =
+          elements.find(
+            el =>
+              (
+                el.textContent || ""
+              ).trim() === name
+          );
+
+        if (!element) {
+          return null;
+        }
+
+        let current = element;
 
         for (
           let i = 0;
@@ -128,21 +228,120 @@ async function extractPlayerKm(page, playerName) {
           const text =
             current.innerText || "";
 
-          if (
-            /\d[\d\s.,'’]*\s*km/i.test(text)
-          ) {
-            return text;
+          const km =
+            text.match(
+              /([0-9][0-9\s.,'’]*)\s*km/i
+            );
+
+          if (km) {
+            return {
+              text,
+              html:
+                current.outerHTML.slice(
+                  0,
+                  3000
+                )
+            };
           }
 
           current =
             current.parentElement;
         }
 
-        return "";
-      });
+        return {
+          text:
+            element.innerText || "",
+          html:
+            element.outerHTML.slice(
+              0,
+              3000
+            )
+        };
+
+      },
+      playerName
+    );
+
+
+  console.log(
+    "===== PLAYER ====="
+  );
+
+  console.log(
+    JSON.stringify(
+      foundPlayer,
+      null,
+      2
+    )
+  );
+
+
+  return {
+    info,
+    foundPlayer
+  };
+}
+
+
+/* =========================================================
+   EXTRAI KM DO JOGADOR
+========================================================= */
+
+async function extractPlayerKm(
+  page,
+  playerName
+) {
+
+  /*
+   * 1 — Link exato
+   */
+
+  const playerLink =
+    page.getByRole("link", {
+      name: playerName,
+      exact: true
+    }).first();
+
+
+  if (
+    await playerLink.count() > 0
+  ) {
+
+    const text =
+      await playerLink.evaluate(
+        el => {
+
+          let current = el;
+
+          for (
+            let i = 0;
+            i < 8 && current;
+            i++
+          ) {
+
+            const value =
+              current.innerText || "";
+
+            if (
+              /\d[\d\s.,'’]*\s*km/i.test(
+                value
+              )
+            ) {
+              return value;
+            }
+
+            current =
+              current.parentElement;
+          }
+
+          return "";
+        }
+      );
+
 
     const km =
-      parseKm(result);
+      parseKm(text);
+
 
     if (km !== null) {
       return km;
@@ -151,13 +350,12 @@ async function extractPlayerKm(page, playerName) {
 
 
   /*
-   * Segunda tentativa:
-   * procura o nome no texto da página e pega
-   * os quilômetros das linhas seguintes.
+   * 2 — Texto da página
    */
 
   const body =
     await page.locator("body").innerText();
+
 
   const lines =
     body
@@ -165,16 +363,21 @@ async function extractPlayerKm(page, playerName) {
       .map(x => x.trim())
       .filter(Boolean);
 
+
   const index =
     lines.findIndex(
       x => x === playerName
     );
 
+
   if (index !== -1) {
 
     for (
       let i = index + 1;
-      i < Math.min(index + 12, lines.length);
+      i < Math.min(
+        index + 15,
+        lines.length
+      );
       i++
     ) {
 
@@ -187,190 +390,43 @@ async function extractPlayerKm(page, playerName) {
     }
   }
 
+
+  /*
+   * 3 — Procura o nome e KM no mesmo bloco
+   */
+
+  const blocks =
+    await page.locator(
+      "tr, li, .card, .row"
+    ).allInnerTexts();
+
+
+  for (const block of blocks) {
+
+    if (
+      block.includes(playerName)
+    ) {
+
+      const km =
+        parseKm(block);
+
+      if (km !== null) {
+        return km;
+      }
+    }
+  }
+
+
   return null;
 }
 
 
 /* =========================================================
-   SELECIONAR PLAYER NO FILTRO DO TRUCKERSBOOK
-========================================================= */
-
-async function selectPlayer(page, playerName) {
-
-  const selects =
-    await page.locator("select").evaluateAll(
-      elements =>
-        elements.map((select, index) => ({
-          index,
-          name:
-            select.getAttribute("name") || "",
-          id:
-            select.id || "",
-          options:
-            Array.from(select.options).map(
-              option => ({
-                text:
-                  (option.textContent || "").trim(),
-                value:
-                  option.value
-              })
-            )
-        }))
-    );
-
-  console.log(
-    "Selects encontrados:",
-    selects.map(s => ({
-      index: s.index,
-      name: s.name,
-      id: s.id,
-      options: s.options.length
-    }))
-  );
-
-
-  /*
-   * Procura o select que contém o jogador.
-   */
-
-  const playerSelect =
-    selects.find(select =>
-      select.options.some(
-        option =>
-          option.text === playerName ||
-          option.text.includes(playerName)
-      )
-    );
-
-  if (!playerSelect) {
-
-    console.log(
-      "Não encontrei o jogador no select:",
-      playerName
-    );
-
-    /*
-     * Mostra alguns nomes disponíveis para diagnóstico.
-     */
-    for (const select of selects) {
-
-      console.log(
-        "Select:",
-        select.name || select.id || select.index
-      );
-
-      console.log(
-        select.options
-          .slice(0, 10)
-          .map(x => x.text)
-      );
-    }
-
-    return false;
-  }
-
-
-  const option =
-    playerSelect.options.find(
-      option =>
-        option.text === playerName
-    ) ||
-    playerSelect.options.find(
-      option =>
-        option.text.includes(playerName)
-    );
-
-
-  console.log(
-    `Selecionando ${playerName}:`,
-    option
-  );
-
-
-  const locator =
-    page.locator("select").nth(
-      playerSelect.index
-    );
-
-
-  /*
-   * Seleciona pelo VALUE.
-   */
-
-  await locator.selectOption(
-    option.value
-  );
-
-
-  /*
-   * Clica em Confirm.
-   */
-
-  const confirm =
-    page.getByRole("button", {
-      name: /confirm/i
-    }).first();
-
-
-  if (
-    await confirm.count() > 0
-  ) {
-
-    console.log(
-      "Clicando em Confirm..."
-    );
-
-    await Promise.all([
-      confirm.click(),
-
-      page.waitForLoadState(
-        "domcontentloaded"
-      ).catch(() => {})
-    ]);
-
-    await page.waitForTimeout(1500);
-
-    return true;
-  }
-
-
-  /*
-   * Caso o botão não seja encontrado,
-   * tenta localizar pelo texto.
-   */
-
-  const button =
-    page.locator("button")
-      .filter({
-        hasText: /confirm/i
-      })
-      .first();
-
-  if (
-    await button.count() > 0
-  ) {
-
-    await button.click();
-
-    await page.waitForTimeout(1500);
-
-    return true;
-  }
-
-
-  console.log(
-    "Botão Confirm não encontrado."
-  );
-
-  return false;
-}
-
-
-/* =========================================================
-   CONSULTAR ESTATÍSTICA DO PLAYER
+   CONSULTA
 ========================================================= */
 
 async function readPlayerStats({
+  browser,
   period,
   mode,
   playerName
@@ -378,9 +434,9 @@ async function readPlayerStats({
 
   const modePath = {
     real: "truck-real",
-    race: "truck-race",
-    wotr: "truck-wotr"
+    race: "truck-race"
   }[mode];
+
 
   if (!modePath) {
     throw new Error(
@@ -414,85 +470,124 @@ async function readPlayerStats({
   );
 
   console.log(
-    "TruckersBook:",
-    playerName
+    `CONSULTA: ${playerName}`
   );
 
   console.log(
-    "Período:",
-    period
+    `Período: ${period}`
   );
 
   console.log(
-    "Modo:",
-    mode
+    `Modo: ${mode}`
   );
 
   console.log(
-    "URL:",
-    url
+    `URL: ${url}`
   );
 
 
-  const browser =
-    await chromium.launch({
-      headless: true
-    });
-
-
-  const context =
-    await browser.newContext({
+  const page =
+    await browser.newPage({
       locale: "pt-BR"
     });
 
 
-  const page =
-    await context.newPage();
-
-
   try {
 
-    await page.goto(
-      url,
-      {
-        waitUntil: "domcontentloaded",
-        timeout: 45000
+    /*
+     * Captura requisições POST/XHR para descobrir
+     * como o filtro do TrucksBook funciona.
+     */
+
+    page.on(
+      "request",
+      request => {
+
+        const method =
+          request.method();
+
+        if (
+          method === "POST" ||
+          request.resourceType() ===
+            "xhr" ||
+          request.resourceType() ===
+            "fetch"
+        ) {
+
+          console.log(
+            "REQUEST:",
+            method,
+            request.url()
+          );
+
+          const data =
+            request.postData();
+
+          if (data) {
+
+            console.log(
+              "POST DATA:",
+              data.slice(0, 2000)
+            );
+          }
+        }
       }
     );
 
 
-    await page.waitForTimeout(1500);
+    page.on(
+      "response",
+      response => {
+
+        const type =
+          response.request().resourceType();
+
+        if (
+          type === "xhr" ||
+          type === "fetch"
+        ) {
+
+          console.log(
+            "RESPONSE:",
+            response.status(),
+            response.url()
+          );
+        }
+      }
+    );
+
+
+    await page.goto(
+      url,
+      {
+        waitUntil:
+          "networkidle",
+        timeout: 60000
+      }
+    );
+
+
+    await page.waitForTimeout(
+      2000
+    );
 
 
     /*
-     * IMPORTANTE:
-     *
-     * O filtro Players pode estar presente
-     * mesmo que o jogador não esteja na página atual.
+     * Diagnóstico da página.
      */
 
-    const selected =
-      await selectPlayer(
-        page,
-        playerName
-      );
-
-
-    if (selected) {
-
-      console.log(
-        "Filtro aplicado."
-      );
-
-      await page.waitForTimeout(1200);
-    }
+    await inspectPage(
+      page,
+      playerName
+    );
 
 
     /*
-     * Agora procura o jogador.
+     * Primeiro tenta encontrar o jogador
+     * sem mexer no formulário.
      */
 
-    const km =
+    let km =
       await extractPlayerKm(
         page,
         playerName
@@ -502,7 +597,7 @@ async function readPlayerStats({
     if (km !== null) {
 
       console.log(
-        `SUCESSO: ${playerName} = ${km} km`
+        `SUCESSO DIRETO: ${playerName} = ${km} km`
       );
 
       return km;
@@ -510,18 +605,139 @@ async function readPlayerStats({
 
 
     /*
-     * Última tentativa:
-     * procura links de perfil que tenham
-     * o ID do jogador.
+     * Descobre automaticamente o select
+     * que contém o jogador.
      */
+
+    const playerSelect =
+      page.locator(
+        "select"
+      ).filter({
+        hasText: playerName
+      }).first();
+
+
+    if (
+      await playerSelect.count() > 0
+    ) {
+
+      console.log(
+        "SELECT DO JOGADOR ENCONTRADO."
+      );
+
+
+      const option =
+        playerSelect
+          .locator("option")
+          .filter({
+            hasText: playerName
+          })
+          .first();
+
+
+      if (
+        await option.count() > 0
+      ) {
+
+        const value =
+          await option.getAttribute(
+            "value"
+          );
+
+
+        console.log(
+          "PLAYER VALUE:",
+          value
+        );
+
+
+        await playerSelect.selectOption(
+          value
+        );
+
+
+        /*
+         * Procura botão Confirm.
+         */
+
+        const confirm =
+          page.locator(
+            "button, input[type=submit]"
+          ).filter({
+            hasText: /confirm/i
+          }).first();
+
+
+        if (
+          await confirm.count() > 0
+        ) {
+
+          console.log(
+            "CONFIRM ENCONTRADO."
+          );
+
+
+          await Promise.all([
+            confirm.click(),
+            page.waitForLoadState(
+              "networkidle",
+              {
+                timeout: 30000
+              }
+            ).catch(() => {})
+          ]);
+
+        } else {
+
+          console.log(
+            "CONFIRM NÃO ENCONTRADO."
+          );
+        }
+
+
+        await page.waitForTimeout(
+          2000
+        );
+
+
+        km =
+          await extractPlayerKm(
+            page,
+            playerName
+          );
+
+
+        if (km !== null) {
+
+          console.log(
+            `SUCESSO APÓS FILTRO: ${playerName} = ${km} km`
+          );
+
+          return km;
+        }
+      }
+    }
+
+
+    /*
+     * Tenta encontrar links de perfil.
+     */
+
+    const profileId =
+      playerName === "Guilherme BR"
+        ? players.guilherme.id
+        : players.fantasma.id;
+
 
     const profileLinks =
       await page.locator("a").evaluateAll(
-        (links, targetId) =>
+        (links, id) =>
           links
             .map(a => ({
               text:
-                (a.innerText || "").trim(),
+                (
+                  a.innerText || ""
+                ).trim(),
               href:
                 a.href
             }))
@@ -529,90 +745,94 @@ async function readPlayerStats({
               x =>
                 x.href &&
                 x.href.includes(
-                  `/profile/${targetId}`
+                  `/profile/${id}`
                 )
             ),
-        playerName === "Guilherme BR"
-          ? 80613
-          : 321853
+        profileId
       );
 
 
-    if (profileLinks.length) {
+    if (
+      profileLinks.length > 0
+    ) {
 
       console.log(
-        "Link de perfil encontrado:",
+        "PROFILE LINK:",
         profileLinks[0]
       );
 
-      const profile =
-        profileLinks[0];
-
       const profilePage =
-        await context.newPage();
+        await browser.newPage({
+          locale: "pt-BR"
+        });
 
-      await profilePage.goto(
-        profile.href,
-        {
-          waitUntil:
-            "domcontentloaded",
-          timeout: 45000
-        }
-      );
 
-      await profilePage.waitForTimeout(
-        1500
-      );
+      try {
 
-      const profileText =
-        await profilePage.locator(
-          "body"
-        ).innerText();
+        await profilePage.goto(
+          profileLinks[0].href,
+          {
+            waitUntil:
+              "networkidle",
+            timeout: 60000
+          }
+        );
 
-      const profileKm =
-        parseKm(profileText);
 
-      if (profileKm !== null) {
+        await profilePage.waitForTimeout(
+          2000
+        );
+
+
+        const text =
+          await profilePage
+            .locator("body")
+            .innerText();
+
+
+        console.log(
+          "PROFILE TEXT:",
+          text.slice(0, 5000)
+        );
+
+
+      } finally {
 
         await profilePage.close();
 
-        console.log(
-          `Encontrado pelo perfil: ${profileKm} km`
-        );
-
-        return profileKm;
       }
-
-      await profilePage.close();
     }
 
 
     /*
-     * Salva uma pequena parte do HTML/texto
-     * no log para podermos diagnosticar se
-     * o TrucksBook mudar novamente.
+     * Salva HTML de diagnóstico.
      */
 
-    const debugText =
-      await page.locator("body").innerText();
+    const html =
+      await page.content();
+
 
     console.log(
-      "Jogador não encontrado."
+      "HTML LENGTH:",
+      html.length
     );
 
+
     console.log(
-      "Trecho da página:",
-      debugText.slice(0, 3000)
+      "PLAYER NÃO ENCONTRADO:",
+      playerName
     );
 
 
     throw new Error(
-      `${playerName} não encontrado em ${url}`
+      `${playerName} não encontrado`
     );
+
 
   } finally {
 
-    await browser.close();
+    await page.close();
+
   }
 }
 
@@ -622,15 +842,6 @@ async function readPlayerStats({
 ========================================================= */
 
 async function getMonthly() {
-
-  /*
-   * Neste momento usamos os valores que já
-   * foram confirmados diretamente no TrucksBook.
-   *
-   * Outubro/2026:
-   * Guilherme = Real
-   * Fantasma = Real + Race
-   */
 
   return {
 
@@ -652,7 +863,7 @@ async function getMonthly() {
    ALL-TIME
 ========================================================= */
 
-async function getAllTime() {
+async function getAllTime(browser) {
 
   console.log(
     "================================"
@@ -668,41 +879,39 @@ async function getAllTime() {
 
 
   /*
-   * Guilherme:
-   *
-   * All-time Real
-   * +
-   * All-time Race
+   * IMPORTANTE:
+   * Fazemos sequencialmente.
+   * Não abrimos 3 Chromiums ao mesmo tempo.
    */
 
-  const [
-    guilhermeReal,
-    guilhermeRace,
-    fantasmaReal
-  ] = await Promise.all([
-
-    readPlayerStats({
+  const guilhermeReal =
+    await readPlayerStats({
+      browser,
       period: "alltime",
       mode: "real",
       playerName:
         players.guilherme.name
-    }),
+    });
 
-    readPlayerStats({
+
+  const guilhermeRace =
+    await readPlayerStats({
+      browser,
       period: "alltime",
       mode: "race",
       playerName:
         players.guilherme.name
-    }),
+    });
 
-    readPlayerStats({
+
+  const fantasmaReal =
+    await readPlayerStats({
+      browser,
       period: "alltime",
       mode: "real",
       playerName:
         players.fantasma.name
-    })
-
-  ]);
+    });
 
 
   const guilhermeTotal =
@@ -760,7 +969,7 @@ async function getAllTime() {
 
 
 /* =========================================================
-   ATUALIZAÇÃO
+   REFRESH
 ========================================================= */
 
 async function refresh() {
@@ -789,86 +998,98 @@ async function refresh() {
   let alltime;
 
 
+  const browser =
+    await chromium.launch({
+      headless: true
+    });
+
+
   try {
 
-    alltime =
-      await getAllTime();
+    try {
 
-  } catch (error) {
+      alltime =
+        await getAllTime(
+          browser
+        );
 
-    console.error(
-      "ERRO NO ALL-TIME:"
-    );
+    } catch (error) {
 
-    console.error(
-      error.message
-    );
+      console.error(
+        "ERRO NO ALL-TIME:"
+      );
 
-
-    /*
-     * Se já temos um valor válido salvo,
-     * preservamos esse valor.
-     */
-
-    let previous = null;
+      console.error(
+        error
+      );
 
 
-    if (
-      fs.existsSync(DATA)
-    ) {
+      /*
+       * Recupera último valor válido.
+       */
 
-      try {
+      let previous = null;
 
-        previous =
-          JSON.parse(
-            fs.readFileSync(
-              DATA,
-              "utf8"
+
+      if (
+        fs.existsSync(DATA)
+      ) {
+
+        try {
+
+          previous =
+            JSON.parse(
+              fs.readFileSync(
+                DATA,
+                "utf8"
+              )
+            );
+
+        } catch (_) {}
+      }
+
+
+      alltime = {
+
+        guilherme: {
+          km:
+            Number.isFinite(
+              previous?.alltime?.guilherme?.km
             )
-          );
+              ? previous.alltime.guilherme.km
+              : null,
 
-      } catch (_) {}
+          mode:
+            "Real + Race"
+        },
+
+
+        fantasma: {
+          km:
+            Number.isFinite(
+              previous?.alltime?.fantasma?.km
+            )
+              ? previous.alltime.fantasma.km
+              : null,
+
+          mode:
+            "Real"
+        }
+
+      };
+
     }
 
 
-    alltime = {
+  } finally {
 
-      guilherme: {
-
-        km:
-          Number.isFinite(
-            previous?.alltime?.guilherme?.km
-          )
-            ? previous.alltime.guilherme.km
-            : null,
-
-        mode:
-          "Real + Race"
-
-      },
-
-
-      fantasma: {
-
-        km:
-          Number.isFinite(
-            previous?.alltime?.fantasma?.km
-          )
-            ? previous.alltime.fantasma.km
-            : null,
-
-        mode:
-          "Real"
-
-      }
-
-    };
+    await browser.close();
 
   }
 
 
   /*
-   * Histórico
+   * HISTÓRICO
    */
 
   let oldHistory = [];
@@ -897,7 +1118,6 @@ async function refresh() {
 
         oldHistory =
           saved.history;
-
       }
 
     } catch (_) {}
@@ -908,7 +1128,7 @@ async function refresh() {
     new Date().toISOString();
 
 
-  let history =
+  const history =
     [
       ...oldHistory.slice(-30)
     ];
@@ -924,15 +1144,9 @@ async function refresh() {
   ) {
 
     history.push({
-
       at: now,
-
-      g:
-        alltime.guilherme.km,
-
-      f:
-        alltime.fantasma.km
-
+      g: alltime.guilherme.km,
+      f: alltime.fantasma.km
     });
 
   }
@@ -1039,10 +1253,8 @@ app.get(
       );
 
       res.status(503).json({
-
         error:
           error.message
-
       });
 
     }
@@ -1082,6 +1294,5 @@ app.listen(
       "Truckers Duel listening on " +
       PORT
     );
-
   }
 );
