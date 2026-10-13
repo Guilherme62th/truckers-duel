@@ -48,7 +48,14 @@ async function refresh(){
     fs.writeFileSync(DATA,JSON.stringify(result,null,2));cache=result;cacheAt=Date.now();return result;
   }catch(e){
     if(cache)return cache;
-    if(fs.existsSync(DATA)){cache=JSON.parse(fs.readFileSync(DATA,"utf8"));return cache}
+    }catch(e){
+    if(cache)return cache;
+    const now=new Date().toISOString();
+    const result={updatedAt:now,monthLabel:"Outubro 2026",...fallback,history:[]};
+    cache=result;
+    cacheAt=Date.now();
+    return result;
+  }
     const now=new Date().toISOString();
     const result={updatedAt:now,monthLabel:"Outubro 2026",...fallback,history:[]};
 cache=result;
