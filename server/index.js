@@ -29,15 +29,18 @@ let cache = null;
 let cacheAt = 0;
 
 /*
-  MODOS CORRETOS:
+========================================================
+CONFIGURAÇÃO DA DISPUTA
+========================================================
 
-  Guilherme:
-    Mensal    = Real
-    All-time  = Real + Race
+Guilherme:
+  Mensal   = Real
+  All-time = Real + Race
 
-  Fantasma:
-    Mensal    = Real + Race
-    All-time  = Real
+Fantasma:
+  Mensal   = Real + Race
+  All-time = Real
+========================================================
 */
 
 const fallback = {
@@ -66,203 +69,500 @@ const fallback = {
   }
 };
 
-function numberFrom(s) {
-  return Number(
-    String(s).replace(/[^\d]/g, "")
+function numberFrom(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const n = Number(
+    String(value).replace(/[^\d]/g, "")
   );
+
+  return Number.isFinite(n) ? n : null;
 }
 
-async function clickMode(page, type) {
+function findNumbersDeep(obj, results = []) {
+  if (obj === null || obj === undefined) {
+    return results;
+  }
+
+  if (typeof obj === "number") {
+    if (Number.isFinite(obj)) {
+      results.push(obj);
+    }
+
+    return results;
+  }
+
+  if (typeof obj === "string") {
+    const matches = obj.match(
+      /\b\d[\d\s.,'’]*\s*(?:km|KM)\b/g
+    );
+
+    if (matches) {
+      for (const m of matches) {
+        const n = numberFrom(m);
+
+        if (n !== null) {
+          results.push(n);
+        }
+      }
+    }
+
+    return results;
+  }
+
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      findNumbersDeep(item, results);
+    }
+
+    return results;
+  }
+
+  if (typeof obj === "object") {
+    for (const key of Object.keys(obj)) {
+      findNumbersDeep(obj[key], results);
+    }
+  }
+
+  return results;
+}
+
+function searchDistanceInText(text) {
+  if (!text) {
+    return [];
+  }
+
+  const patterns = [
+    /Distance\s*:?\s*([0-9][0-9\s.,'’]*)\s*km/gi,
+    /distance[^0-9]{0,30}([0-9][0-9\s.,'’]*)\s*km/gi,
+    /([0-9][0-9\s.,'’]*)\s*km/gi
+  ];
+
+  const values = [];
+
+  for (const regex of patterns) {
+    for (const match of text.matchAll(regex)) {
+      const n = numberFrom(match[1]);
+
+      if (n !== null) {
+        values.push(n);
+      }
+    }
+  }
+
+  return values;
+}
+
+async function clickVisible(page, text) {
+  try {
+    const locator = page
+      .getByText(text, { exact: true })
+      .first();
+
+    if (await locator.count()) {
+      if (await locator.isVisible()) {
+        await locator.click();
+        await page.waitForTimeout(1000);
+        return true;
+      }
+    }
+  } catch (_) {}
+
+  return false;
+}
+
+async function selectPeriod(page, period) {
+  try {
+    const button = page
+      .getByText(period, { exact: true })
+      .first();
+
+    if (await button.count()) {
+      await button.click();
+      await page.waitForTimeout(1200);
+      return true;
+    }
+  } catch (_) {}
+
+  return false;
+}
+
+async function selectETS2(page) {
+  try {
+    const button = page
+      .getByText("ETS2", { exact: true })
+      .first();
+
+    if (await button.count()) {
+      await button.click();
+      await page.waitForTimeout(1000);
+      return true;
+    }
+  } catch (_) {}
+
+  return false;
+}
+
+async function selectMode(page, type) {
   /*
-    O TrucksBook pode apresentar os modos
-    como:
-
-      Real
-      Race
-      Real + Race
-      All
-
-    Para nossa comparação NÃO usamos "All".
+    Tentamos primeiro exatamente "Real + Race".
   */
 
   if (type === "Real + Race") {
-    const buttons = [
-      page.getByText("Real + Race", { exact: true }).first(),
-      page.getByText("Real+Race", { exact: true }).first()
+
+    const names = [
+      "Real + Race",
+      "Real+Race",
+      "Real / Race"
     ];
 
-    for (const button of buttons) {
-      try {
-        if (await button.isVisible()) {
-          await button.click();
-          await page.waitForTimeout(700);
-          return;
-        }
-      } catch (_) {}
+    for (const name of names) {
+      if (await clickVisible(page, name)) {
+        return true;
+      }
     }
   }
 
   if (type === "Real") {
-    try {
-      const button = page.getByText("Real", {
-        exact: true
-      }).first();
-
-      if (await button.isVisible()) {
-        await button.click();
-        await page.waitForTimeout(700);
-        return;
-      }
-    } catch (_) {}
+    if (await clickVisible(page, "Real")) {
+      return true;
+    }
   }
 
   if (type === "Race") {
-    try {
-      const button = page.getByText("Race", {
-        exact: true
-      }).first();
-
-      if (await button.isVisible()) {
-        await button.click();
-        await page.waitForTimeout(700);
-        return;
-      }
-    } catch (_) {}
+    if (await clickVisible(page, "Race")) {
+      return true;
+    }
   }
+
+  return false;
 }
 
-async function extract(page, period, type) {
+/*
+========================================================
+EXTRATOR POR DOM
+========================================================
+*/
 
-  /*
-    Seleciona Monthly ou All-time.
-  */
-
-  try {
-    const periodButton = page
-      .getByText(period, { exact: true })
-      .first();
-
-    if (await periodButton.isVisible()) {
-      await periodButton.click();
-      await page.waitForTimeout(800);
-    }
-  } catch (_) {}
-
-  /*
-    Seleciona ETS2.
-  */
-
-  try {
-    const ets2 = page
-      .getByText("ETS2", { exact: true })
-      .first();
-
-    if (await ets2.isVisible()) {
-      await ets2.click();
-      await page.waitForTimeout(700);
-    }
-  } catch (_) {}
-
-  /*
-    Seleciona o modo correto.
-  */
-
-  await clickMode(page, type);
-
-  /*
-    Aguarda o carregamento da estatística.
-  */
-
-  await page.waitForTimeout(1200);
+async function extractFromDom(page) {
 
   const text = await page.locator("body").innerText();
 
-  /*
-    Procura:
+  const values = searchDistanceInText(text);
 
-      Distance XXXXX km
-
-    ou variações de espaçamento.
-  */
-
-  const matches = [
-    ...text.matchAll(
-      /Distance\s+([0-9][0-9 .,'\u202f]*)\s*km/gi
-    )
-  ]
-    .map(match => numberFrom(match[1]))
-    .filter(Number.isFinite);
-
-  if (!matches.length) {
-    throw new Error(
-      "Distância ETS2 não encontrada após selecionar " +
-      period +
-      " / " +
-      type
-    );
+  if (!values.length) {
+    return null;
   }
 
-  return Math.max(...matches);
+  /*
+    Normalmente haverá mais de uma distância
+    na página. Pegamos a maior.
+  */
+
+  return Math.max(...values);
 }
 
-async function scrapePlayer(p) {
+/*
+========================================================
+EXTRATOR DE RESPOSTAS DE REDE
+========================================================
+*/
 
-  const browser = await chromium.launch({
-    headless: true
-  });
+async function extractFromResponses(responses) {
 
-  const page = await browser.newPage({
-    locale: "pt-BR"
-  });
+  const candidates = [];
+
+  for (const response of responses) {
+
+    try {
+
+      const url = response.url();
+
+      /*
+        Só analisamos respostas que tenham
+        alguma relação com estatísticas.
+      */
+
+      const interesting =
+        /stat|profile|player|distance|truck|user/i.test(url);
+
+      if (!interesting) {
+        continue;
+      }
+
+      const contentType =
+        response.headers()["content-type"] || "";
+
+      if (
+        !contentType.includes("json") &&
+        !contentType.includes("javascript") &&
+        !contentType.includes("text")
+      ) {
+        continue;
+      }
+
+      const body = await response.text();
+
+      if (!body) {
+        continue;
+      }
+
+      /*
+        Primeiro tentamos JSON.
+      */
+
+      try {
+
+        const json = JSON.parse(body);
+
+        const numbers =
+          findNumbersDeep(json);
+
+        for (const n of numbers) {
+          if (n > 1000) {
+            candidates.push(n);
+          }
+        }
+
+      } catch (_) {
+
+        /*
+          Se não for JSON,
+          procuramos texto.
+        */
+
+        const numbers =
+          searchDistanceInText(body);
+
+        for (const n of numbers) {
+          if (n > 1000) {
+            candidates.push(n);
+          }
+        }
+      }
+
+    } catch (_) {}
+  }
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  return Math.max(...candidates);
+}
+
+/*
+========================================================
+EXTRAÇÃO PRINCIPAL
+========================================================
+*/
+
+async function extract(page, period, type, responses) {
+
+  console.log(
+    `Selecionando ${period} / ETS2 / ${type}`
+  );
+
+  await selectPeriod(page, period);
+
+  await selectETS2(page);
+
+  await selectMode(page, type);
+
+  /*
+    Damos tempo para o TrucksBook fazer
+    a requisição dinâmica.
+  */
+
+  await page.waitForTimeout(1800);
+
+  /*
+    Primeiro tentamos o DOM.
+  */
+
+  let value =
+    await extractFromDom(page);
+
+  if (value !== null) {
+
+    console.log(
+      `Encontrado no DOM: ${value} km`
+    );
+
+    return value;
+  }
+
+  /*
+    Depois analisamos as respostas
+    de rede capturadas.
+  */
+
+  value =
+    await extractFromResponses(responses);
+
+  if (value !== null) {
+
+    console.log(
+      `Encontrado na rede: ${value} km`
+    );
+
+    return value;
+  }
+
+  throw new Error(
+    `Não foi possível encontrar distância para ${period} / ${type}`
+  );
+}
+
+/*
+========================================================
+SCRAPER DO JOGADOR
+========================================================
+*/
+
+async function scrapePlayer(player) {
+
+  console.log(
+    `Abrindo TrucksBook: ${player.name}`
+  );
+
+  const browser =
+    await chromium.launch({
+      headless: true
+    });
+
+  const page =
+    await browser.newPage({
+      locale: "pt-BR"
+    });
+
+  const responses = [];
+
+  page.on(
+    "response",
+    response => {
+
+      const url = response.url();
+
+      /*
+        Guardamos somente respostas
+        potencialmente relevantes.
+      */
+
+      if (
+        /api|ajax|stat|profile|player|distance|truck|user/i
+          .test(url)
+      ) {
+        responses.push(response);
+      }
+    }
+  );
 
   try {
 
-    await page.goto(p.url, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000
-    });
+    await page.goto(
+      player.url,
+      {
+        waitUntil: "domcontentloaded",
+        timeout: 30000
+      }
+    );
 
-    await page.waitForTimeout(1200);
+    await page.waitForTimeout(1800);
 
     /*
-      ============================
+      ==================================================
       MENSAL
-      ============================
-
-      Guilherme = Real
-      Fantasma  = Real + Race
+      ==================================================
     */
 
     const monthlyType =
-      p.id === 80613
+      player.id === 80613
         ? "Real"
         : "Real + Race";
 
     /*
-      ============================
+      ==================================================
       ALL-TIME
-      ============================
-
-      Guilherme = Real + Race
-      Fantasma  = Real
+      ==================================================
     */
 
     const alltimeType =
-      p.id === 80613
+      player.id === 80613
         ? "Real + Race"
         : "Real";
 
-    const monthly = await extract(
-      page,
-      "Monthly",
-      monthlyType
-    );
+    /*
+      ==================================================
+      MONTHLY
+      ==================================================
+    */
 
-    const alltime = await extract(
-      page,
-      "All-time",
-      alltimeType
-    );
+    let monthly = null;
+
+    try {
+
+      monthly =
+        await extract(
+          page,
+          "Monthly",
+          monthlyType,
+          responses
+        );
+
+    } catch (e) {
+
+      console.error(
+        `${player.name} mensal:`,
+        e.message
+      );
+
+    }
+
+    /*
+      ==================================================
+      ALL-TIME
+      ==================================================
+    */
+
+    let alltime = null;
+
+    try {
+
+      alltime =
+        await extract(
+          page,
+          "All-time",
+          alltimeType,
+          responses
+        );
+
+    } catch (e) {
+
+      console.error(
+        `${player.name} all-time:`,
+        e.message
+      );
+
+    }
+
+    /*
+      Se mensal falhar, usamos o valor conhecido
+      somente para o mês atual.
+    */
+
+    if (monthly === null) {
+
+      if (player.id === 80613) {
+        monthly = fallback.monthly.guilherme.km;
+      }
+
+      if (player.id === 321853) {
+        monthly = fallback.monthly.fantasma.km;
+      }
+    }
 
     return {
       monthly,
@@ -276,34 +576,66 @@ async function scrapePlayer(p) {
   }
 }
 
+/*
+========================================================
+REFRESH
+========================================================
+*/
+
 async function refresh() {
 
   try {
 
     console.log(
+      "======================================"
+    );
+
+    console.log(
       "Atualizando dados do TrucksBook..."
     );
 
-    const [g, f] = await Promise.all([
-      scrapePlayer(players.guilherme),
-      scrapePlayer(players.fantasma)
+    console.log(
+      "======================================"
+    );
+
+    const [
+      guilherme,
+      fantasma
+    ] = await Promise.all([
+
+      scrapePlayer(
+        players.guilherme
+      ),
+
+      scrapePlayer(
+        players.fantasma
+      )
+
     ]);
 
-    let old = [];
-
     /*
-      Recupera histórico anterior.
+      Histórico existente.
     */
+
+    let old = [];
 
     if (fs.existsSync(DATA)) {
 
       try {
 
-        const saved = JSON.parse(
-          fs.readFileSync(DATA, "utf8")
-        );
+        const saved =
+          JSON.parse(
+            fs.readFileSync(
+              DATA,
+              "utf8"
+            )
+          );
 
-        if (Array.isArray(saved.history)) {
+        if (
+          Array.isArray(
+            saved.history
+          )
+        ) {
           old = saved.history;
         }
 
@@ -314,19 +646,89 @@ async function refresh() {
       }
     }
 
-    const now = new Date().toISOString();
+    const now =
+      new Date().toISOString();
 
     const monthLabel =
-      new Intl.DateTimeFormat("pt-BR", {
-        month: "long",
-        year: "numeric",
-        timeZone: "Europe/Madrid"
-      })
+      new Intl.DateTimeFormat(
+        "pt-BR",
+        {
+          month: "long",
+          year: "numeric",
+          timeZone: "Europe/Madrid"
+        }
+      )
         .format(new Date())
         .replace(
           /^./,
           c => c.toUpperCase()
         );
+
+    /*
+      Se All-time ainda não foi encontrado,
+      preservamos um valor válido anterior,
+      se existir.
+
+      NÃO inventamos valores.
+    */
+
+    let previousAlltime = {
+      guilherme: null,
+      fantasma: null
+    };
+
+    if (fs.existsSync(DATA)) {
+
+      try {
+
+        const previous =
+          JSON.parse(
+            fs.readFileSync(
+              DATA,
+              "utf8"
+            )
+          );
+
+        previousAlltime.guilherme =
+          previous?.alltime?.guilherme?.km ??
+          null;
+
+        previousAlltime.fantasma =
+          previous?.alltime?.fantasma?.km ??
+          null;
+
+      } catch (_) {}
+    }
+
+    const guilhermeAlltime =
+      guilherme.alltime ??
+      previousAlltime.guilherme;
+
+    const fantasmaAlltime =
+      fantasma.alltime ??
+      previousAlltime.fantasma;
+
+    /*
+      Histórico somente recebe ponto
+      quando temos os dois All-time.
+    */
+
+    let history = [
+      ...old.slice(-30)
+    ];
+
+    if (
+      Number.isFinite(guilhermeAlltime) &&
+      Number.isFinite(fantasmaAlltime)
+    ) {
+
+      history.push({
+        at: now,
+        g: guilhermeAlltime,
+        f: fantasmaAlltime
+      });
+
+    }
 
     const result = {
 
@@ -337,13 +739,21 @@ async function refresh() {
       monthly: {
 
         guilherme: {
-          km: g.monthly,
-          mode: "Real"
+          km:
+            guilherme.monthly ??
+            fallback.monthly.guilherme.km,
+
+          mode:
+            "Real"
         },
 
         fantasma: {
-          km: f.monthly,
-          mode: "Real + Race"
+          km:
+            fantasma.monthly ??
+            fallback.monthly.fantasma.km,
+
+          mode:
+            "Real + Race"
         }
 
       },
@@ -351,28 +761,18 @@ async function refresh() {
       alltime: {
 
         guilherme: {
-          km: g.alltime,
+          km: guilhermeAlltime,
           mode: "Real + Race"
         },
 
         fantasma: {
-          km: f.alltime,
+          km: fantasmaAlltime,
           mode: "Real"
         }
 
       },
 
-      history: [
-
-        ...old.slice(-30),
-
-        {
-          at: now,
-          g: g.alltime,
-          f: f.alltime
-        }
-
-      ]
+      history
 
     };
 
@@ -389,27 +789,35 @@ async function refresh() {
     cacheAt = Date.now();
 
     console.log(
-      "TrucksBook atualizado com sucesso."
+      "======================================"
+    );
+
+    console.log(
+      "RESULTADO"
     );
 
     console.log(
       "Guilherme mensal:",
-      g.monthly
+      result.monthly.guilherme.km
     );
 
     console.log(
       "Fantasma mensal:",
-      f.monthly
+      result.monthly.fantasma.km
     );
 
     console.log(
       "Guilherme all-time:",
-      g.alltime
+      result.alltime.guilherme.km
     );
 
     console.log(
       "Fantasma all-time:",
-      f.alltime
+      result.alltime.fantasma.km
+    );
+
+    console.log(
+      "======================================"
     );
 
     return result;
@@ -417,13 +825,13 @@ async function refresh() {
   } catch (e) {
 
     console.error(
-      "Erro ao atualizar dados do TrucksBook:",
-      e.message
+      "Erro geral no TrucksBook:",
+      e
     );
 
     /*
-      Se já existe cache válido,
-      mantém os dados anteriores.
+      Se já temos cache,
+      mantemos o último resultado.
     */
 
     if (cache) {
@@ -431,11 +839,7 @@ async function refresh() {
     }
 
     /*
-      Primeiro carregamento sem sucesso:
-      usamos somente os dados mensais
-      que sabemos que estão corretos.
-
-      NÃO inventamos números de All-time.
+      Primeiro carregamento.
     */
 
     const now =
@@ -446,19 +850,7 @@ async function refresh() {
       updatedAt: now,
 
       monthLabel:
-        new Intl.DateTimeFormat(
-          "pt-BR",
-          {
-            month: "long",
-            year: "numeric",
-            timeZone: "Europe/Madrid"
-          }
-        )
-          .format(new Date())
-          .replace(
-            /^./,
-            c => c.toUpperCase()
-          ),
+        "Outubro de 2026",
 
       monthly: {
         ...fallback.monthly
@@ -479,6 +871,12 @@ async function refresh() {
   }
 }
 
+/*
+========================================================
+API
+========================================================
+*/
+
 app.get(
   "/api/stats",
   async (req, res) => {
@@ -487,7 +885,8 @@ app.get(
 
       if (
         !cache ||
-        Date.now() - cacheAt > CACHE_MS
+        Date.now() - cacheAt >
+        CACHE_MS
       ) {
 
         await refresh();
@@ -507,6 +906,12 @@ app.get(
   }
 );
 
+/*
+========================================================
+FRONTEND
+========================================================
+*/
+
 app.get(
   "/{*splat}",
   (req, res) => {
@@ -520,6 +925,12 @@ app.get(
 
   }
 );
+
+/*
+========================================================
+SERVER
+========================================================
+*/
 
 app.listen(
   PORT,
