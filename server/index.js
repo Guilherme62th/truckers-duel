@@ -26,7 +26,7 @@ let cacheAt = 0;
 
 /* =========================================================
    UTILIDADES
-========================================================= */
+   ========================================================= */
 
 function parseKm(text) {
   if (!text) return null;
@@ -55,23 +55,6 @@ function parseKm(text) {
 }
 
 
-function getMonthParts() {
-  const parts = new Intl.DateTimeFormat(
-    "en-US",
-    {
-      timeZone: "Europe/Madrid",
-      year: "numeric",
-      month: "2-digit"
-    }
-  ).formatToParts(new Date());
-
-  return {
-    year: parts.find(x => x.type === "year").value,
-    month: parts.find(x => x.type === "month").value
-  };
-}
-
-
 function getMonthLabel() {
   return new Intl.DateTimeFormat(
     "pt-BR",
@@ -87,715 +70,181 @@ function getMonthLabel() {
 
 
 /* =========================================================
-   EXAMINA CONTROLES DO TRUCKERSBOOK
-========================================================= */
+   CLICAR CONTROLE
+   ========================================================= */
 
-async function inspectControls(page) {
-
-  const controls = await page.evaluate(() => {
-
-    const result = [];
-
-    const elements = document.querySelectorAll(
-      "select, input, button, [role='combobox'], [role='listbox']"
-    );
-
-    for (const el of elements) {
-
-      const rect = el.getBoundingClientRect();
-
-      result.push({
-        tag: el.tagName,
-        type: el.getAttribute("type") || "",
-        id: el.id || "",
-        name: el.getAttribute("name") || "",
-        value: el.value || "",
-        text: (el.innerText || "").trim().slice(0, 300),
-        aria:
-          el.getAttribute("aria-label") || "",
-        placeholder:
-          el.getAttribute("placeholder") || "",
-        class:
-          el.className?.toString().slice(0, 300) || "",
-        visible:
-          rect.width > 0 &&
-          rect.height > 0
-      });
-    }
-
-    return result;
+async function clickText(page, text) {
+  const locator = page.getByText(text, {
+    exact: true
   });
 
-  console.log("========== CONTROLES ==========");
+  const count = await locator.count();
 
-  console.log(
-    JSON.stringify(
-      controls,
-      null,
-      2
-    )
-  );
+  if (!count) {
+    return false;
+  }
 
-  return controls;
-}
+  for (let i = count - 1; i >= 0; i--) {
+    try {
+      const element = locator.nth(i);
 
-
-/* =========================================================
-   PROCURA CONTROLE DO PLAYER
-========================================================= */
-
-async function selectPlayer(
-  page,
-  player
-) {
-
-  console.log(
-    `PROCURANDO JOGADOR: ${player.name} (${player.id})`
-  );
-
-
-  /*
-   * Primeiro inspecionamos todos os controles.
-   */
-
-  const controls =
-    await inspectControls(page);
-
-
-  /*
-   * Procura elementos que contenham:
-   *
-   * Guilherme BR
-   * Fantasma MG
-   * 80613
-   * 321853
-   */
-
-  const candidate =
-    await page.evaluate(
-      ({ name, id }) => {
-
-        const text =
-          document.body.innerText || "";
-
-        const all =
-          Array.from(
-            document.querySelectorAll("*")
-          );
-
-        const found = [];
-
-        for (const el of all) {
-
-          const value =
-            (
-              el.textContent ||
-              ""
-            ).trim();
-
-          if (!value) continue;
-
-          if (
-            value === name ||
-            value.includes(name) ||
-            value.includes(String(id))
-          ) {
-
-            const rect =
-              el.getBoundingClientRect();
-
-            found.push({
-              tag: el.tagName,
-              id: el.id || "",
-              name:
-                el.getAttribute("name") || "",
-              value:
-                el.getAttribute("value") || "",
-              role:
-                el.getAttribute("role") || "",
-              text:
-                value.slice(0, 500),
-              html:
-                el.outerHTML.slice(0, 1500),
-              visible:
-                rect.width > 0 &&
-                rect.height > 0
-            });
-          }
-        }
-
-        return {
-          bodyHasName:
-            text.includes(name),
-
-          bodyHasId:
-            text.includes(String(id)),
-
-          found:
-            found.slice(0, 30)
-        };
-
-      },
-      {
-        name: player.name,
-        id: player.id
-      }
-    );
-
-
-  console.log(
-    "========== CANDIDATOS PLAYER =========="
-  );
-
-  console.log(
-    JSON.stringify(
-      candidate,
-      null,
-      2
-    )
-  );
-
-
-  /*
-   * =======================================================
-   * SELECT NATIVO
-   * =======================================================
-   */
-
-  const selects =
-    await page.locator("select").all();
-
-
-  for (const select of selects) {
-
-    const options =
-      await select.locator("option").all();
-
-
-    for (const option of options) {
-
-      const text =
-        (
-          await option.innerText()
-        ).trim();
-
-
-      const value =
-        await option.getAttribute(
-          "value"
-        );
-
-
-      if (
-        text === player.name ||
-        text.includes(player.name) ||
-        value === String(player.id) ||
-        value?.includes(String(player.id))
-      ) {
+      if (await element.isVisible()) {
+        await element.click();
 
         console.log(
-          "PLAYER ENCONTRADO EM SELECT:",
-          text,
-          value
+          `CONTROLE CLICADO: ${text}`
         );
 
-
-        await select.selectOption(
-          value
-        );
-
-
         return true;
       }
-    }
+    } catch (_) {}
   }
-
-
-  /*
-   * =======================================================
-   * INPUT
-   * =======================================================
-   */
-
-  const inputs =
-    await page.locator("input").all();
-
-
-  for (const input of inputs) {
-
-    const value =
-      await input.getAttribute("value");
-
-    const name =
-      await input.getAttribute("name");
-
-    const id =
-      await input.getAttribute("id");
-
-    const type =
-      await input.getAttribute("type");
-
-
-    if (
-      value === player.name ||
-      value === String(player.id) ||
-      name === "player" ||
-      name === "player_id" ||
-      name === "playerId" ||
-      id === "player" ||
-      id === "player_id" ||
-      id === "playerId"
-    ) {
-
-      console.log(
-        "INPUT PLAYER ENCONTRADO:",
-        {
-          id,
-          name,
-          value,
-          type
-        }
-      );
-
-
-      await input.fill(
-        String(player.id)
-      );
-
-
-      return true;
-    }
-  }
-
-
-  /*
-   * =======================================================
-   * COMBOBOX / SELECT2 / BOOTSTRAP
-   * =======================================================
-   */
-
-  const combo =
-    page.locator(
-      "[role='combobox']"
-    );
-
-
-  const comboCount =
-    await combo.count();
-
-
-  for (
-    let i = 0;
-    i < comboCount;
-    i++
-  ) {
-
-    const el =
-      combo.nth(i);
-
-
-    const text =
-      (
-        await el.innerText()
-      ).trim();
-
-
-    const aria =
-      await el.getAttribute(
-        "aria-label"
-      );
-
-
-    const placeholder =
-      await el.getAttribute(
-        "placeholder"
-      );
-
-
-    console.log(
-      "COMBOBOX:",
-      {
-        text,
-        aria,
-        placeholder
-      }
-    );
-
-
-    if (
-      /player|jogador/i.test(
-        `${text} ${aria} ${placeholder}`
-      )
-    ) {
-
-      console.log(
-        "COMBOBOX DO PLAYER ENCONTRADO"
-      );
-
-
-      await el.click();
-
-
-      await page.waitForTimeout(
-        500
-      );
-
-
-      /*
-       * Procura o nome depois que o dropdown abriu.
-       */
-
-      const option =
-        page.getByText(
-          player.name,
-          {
-            exact: true
-          }
-        ).last();
-
-
-      if (
-        await option.count() > 0
-      ) {
-
-        await option.click();
-
-        return true;
-      }
-
-
-      /*
-       * Procura pelo ID.
-       */
-
-      const idOption =
-        page.getByText(
-          String(player.id),
-          {
-            exact: true
-          }
-        ).last();
-
-
-      if (
-        await idOption.count() > 0
-      ) {
-
-        await idOption.click();
-
-        return true;
-      }
-    }
-  }
-
-
-  /*
-   * =======================================================
-   * BOTÕES / DROPDOWNS
-   * =======================================================
-   */
-
-  const buttons =
-    page.locator(
-      "button"
-    );
-
-
-  const buttonCount =
-    await buttons.count();
-
-
-  for (
-    let i = 0;
-    i < buttonCount;
-    i++
-  ) {
-
-    const button =
-      buttons.nth(i);
-
-
-    const text =
-      (
-        await button.innerText()
-      ).trim();
-
-
-    if (
-      /player|jogador/i.test(text)
-    ) {
-
-      console.log(
-        "BOTÃO PLAYER:",
-        text
-      );
-
-
-      await button.click();
-
-      await page.waitForTimeout(
-        500
-      );
-
-
-      const option =
-        page.getByText(
-          player.name,
-          {
-            exact: true
-          }
-        ).last();
-
-
-      if (
-        await option.count() > 0
-      ) {
-
-        await option.click();
-
-        return true;
-      }
-    }
-  }
-
-
-  console.log(
-    "NÃO CONSEGUI SELECIONAR O PLAYER."
-  );
 
   return false;
 }
 
 
 /* =========================================================
-   CONFIRM
-========================================================= */
+   CLICAR MODO ETS2
+   ========================================================= */
 
-async function confirmPlayer(page) {
+async function clickMode(page, mode) {
 
-  const confirm =
+  const buttons =
     page.getByRole(
       "button",
       {
-        name: "Confirm",
+        name: mode,
         exact: true
       }
     );
 
+  const count =
+    await buttons.count();
 
-  if (
-    await confirm.count() === 0
+  console.log(
+    `BOTÕES ${mode}: ${count}`
+  );
+
+  for (
+    let i = 0;
+    i < count;
+    i++
   ) {
 
-    console.log(
-      "BOTÃO CONFIRM NÃO ENCONTRADO."
-    );
+    try {
 
-    return false;
-  }
-
-
-  console.log(
-    "CLICANDO CONFIRM..."
-  );
-
-
-  const beforeUrl =
-    page.url();
-
-
-  const requests = [];
-
-
-  const requestHandler =
-    request => {
+      const button =
+        buttons.nth(i);
 
       if (
-        request.method() !== "GET" ||
-        request.resourceType() ===
-          "document"
+        await button.isVisible()
       ) {
 
-        requests.push({
-          method:
-            request.method(),
+        await button.click();
 
-          url:
-            request.url(),
+        console.log(
+          `MODO CLICADO: ${mode}`
+        );
 
-          postData:
-            request.postData()
-        });
-
+        return true;
       }
-    };
 
-
-  page.on(
-    "request",
-    requestHandler
-  );
-
-
-  try {
-
-    await Promise.race([
-
-      confirm.click(),
-
-      page.waitForTimeout(
-        10000
-      )
-
-    ]);
-
-  } finally {
-
-    page.off(
-      "request",
-      requestHandler
-    );
+    } catch (_) {}
 
   }
 
-
-  await page.waitForTimeout(
-    2500
-  );
-
-
-  console.log(
-    "URL ANTES:",
-    beforeUrl
-  );
-
-  console.log(
-    "URL DEPOIS:",
-    page.url()
-  );
-
-
-  console.log(
-    "REQUESTS DO CONFIRM:"
-  );
-
-  console.log(
-    JSON.stringify(
-      requests,
-      null,
-      2
-    )
-  );
-
-
-  return true;
+  return false;
 }
 
 
 /* =========================================================
-   EXTRAI KM
-========================================================= */
+   EXTRAIR KM
+   ========================================================= */
 
-async function extractPlayerKm(
-  page,
-  playerName
-) {
+async function extractDistance(page) {
+
+  await page.waitForTimeout(3000);
+
+  const body =
+    await page
+      .locator("body")
+      .innerText();
+
+  console.log(
+    "PROCURANDO DISTÂNCIA..."
+  );
+
 
   /*
-   * Primeiro tenta linhas de tabela.
+   * Primeira tentativa:
+   *
+   * Distance 123 456 km
    */
 
-  const rows =
-    page.locator("tr");
+  const distanceMatch =
+    body.match(
+      /Distance[\s\S]{0,100}?([0-9][0-9\s.,'’]*)\s*km/i
+    );
 
 
-  const rowCount =
-    await rows.count();
+  if (distanceMatch) {
 
-
-  for (
-    let i = 0;
-    i < rowCount;
-    i++
-  ) {
-
-    const row =
-      rows.nth(i);
-
-
-    const text =
-      (
-        await row.innerText()
-      ).trim();
-
+    const km =
+      Number(
+        distanceMatch[1]
+          .replace(/[^\d]/g, "")
+      );
 
     if (
-      text.includes(playerName)
+      Number.isFinite(km) &&
+      km > 0
     ) {
 
       console.log(
-        "LINHA DO PLAYER:"
+        "DISTÂNCIA ENCONTRADA:",
+        km
       );
 
-      console.log(
-        text
-      );
-
-
-      const km =
-        parseKm(text);
-
-
-      if (km !== null) {
-        return km;
-      }
+      return km;
     }
   }
 
 
   /*
-   * Procura blocos próximos ao nome.
+   * Segunda tentativa:
+   * qualquer número seguido de km.
    */
 
-  const body =
-    await page.locator(
-      "body"
-    ).innerText();
-
-
-  const lines =
-    body
-      .split("\n")
-      .map(x => x.trim())
-      .filter(Boolean);
-
-
-  const index =
-    lines.findIndex(
-      x =>
-        x === playerName ||
-        x.includes(playerName)
+  const matches =
+    body.match(
+      /([0-9][0-9\s.,'’]*)\s*km/gi
     );
 
 
-  if (index >= 0) {
+  if (matches) {
 
-    for (
-      let i = index;
-      i < Math.min(
-        index + 20,
-        lines.length
-      );
-      i++
-    ) {
+    for (const match of matches) {
+
+      const number =
+        match
+          .replace(/km/i, "")
+          .replace(/[^\d]/g, "");
 
       const km =
-        parseKm(lines[i]);
+        Number(number);
 
-      if (km !== null) {
+      /*
+       * Ignora valores muito pequenos.
+       */
+
+      if (
+        Number.isFinite(km) &&
+        km > 100
+      ) {
 
         console.log(
-          "KM ENCONTRADO:",
+          "KM ENCONTRADO POR FALLBACK:",
           km
         );
 
@@ -805,94 +254,13 @@ async function extractPlayerKm(
   }
 
 
-  /*
-   * Última tentativa: procura link do perfil.
-   */
-
-  const profile =
-    page.locator(
-      `a[href*="/profile/"]`
-    );
-
-
-  const profileCount =
-    await profile.count();
-
-
-  for (
-    let i = 0;
-    i < profileCount;
-    i++
-  ) {
-
-    const link =
-      profile.nth(i);
-
-
-    const text =
-      (
-        await link.innerText()
-      ).trim();
-
-
-    if (
-      text.includes(playerName)
-    ) {
-
-      const parentText =
-        await link.evaluate(
-          el => {
-
-            let p = el;
-
-            for (
-              let i = 0;
-              i < 6 && p;
-              i++
-            ) {
-
-              const t =
-                p.innerText || "";
-
-              if (
-                /\d[\d\s.,'’]*\s*km/i.test(
-                  t
-                )
-              ) {
-                return t;
-              }
-
-              p =
-                p.parentElement;
-            }
-
-            return "";
-          }
-        );
-
-
-      const km =
-        parseKm(parentText);
-
-
-      if (km !== null) {
-        return km;
-      }
-    }
-  }
-
-
-  console.log(
-    `KM NÃO ENCONTRADO PARA ${playerName}`
-  );
-
   return null;
 }
 
 
 /* =========================================================
-   READ STATS
-========================================================= */
+   LER PERFIL DO JOGADOR
+   ========================================================= */
 
 async function readPlayerStats({
   browser,
@@ -901,25 +269,8 @@ async function readPlayerStats({
   player
 }) {
 
-  const modePath = {
-    real: "truck-real",
-    race: "truck-race"
-  }[mode];
-
-
   const url =
-    period === "alltime"
-      ? `https://trucksbook.eu/player_stats/0/0/1/${modePath}`
-      : (() => {
-
-          const {
-            year,
-            month
-          } = getMonthParts();
-
-          return `https://trucksbook.eu/player_stats/${year}/${month}/1/${modePath}`;
-
-        })();
+    `https://trucksbook.eu/profile/${player.id}`;
 
 
   console.log(
@@ -927,7 +278,7 @@ async function readPlayerStats({
   );
 
   console.log(
-    "TRUCKERSBOOK"
+    "TRUCKERSBOOK — PERFIL"
   );
 
   console.log(
@@ -971,8 +322,10 @@ async function readPlayerStats({
     await page.goto(
       url,
       {
-        waitUntil: "domcontentloaded",
-        timeout: 60000
+        waitUntil:
+          "domcontentloaded",
+        timeout:
+          60000
       }
     );
 
@@ -983,48 +336,66 @@ async function readPlayerStats({
 
 
     /*
-     * Tenta selecionar o jogador.
+     * ALL-TIME
      */
 
-    const selected =
-      await selectPlayer(
-        page,
-        player
-      );
+    if (
+      period === "alltime"
+    ) {
 
-
-    if (selected) {
-
-      console.log(
-        "PLAYER SELECIONADO."
-      );
-
-
-      await confirmPlayer(
-        page
-      );
-
-    } else {
+      const allTime =
+        await clickText(
+          page,
+          "All-time"
+        );
 
       console.log(
-        "PLAYER NÃO FOI SELECIONADO."
+        "ALL-TIME:",
+        allTime
+      );
+
+      await page.waitForTimeout(
+        3000
       );
     }
 
 
-    await page.waitForTimeout(
-      3000
+    /*
+     * ETS2 REAL / RACE
+     */
+
+    const selectedMode =
+      await clickMode(
+        page,
+        mode === "race"
+          ? "Race"
+          : "Real"
+      );
+
+    console.log(
+      "MODO SELECIONADO:",
+      selectedMode
     );
 
 
+    await page.waitForTimeout(
+      4000
+    );
+
+
+    /*
+     * EXTRAIR KM
+     */
+
     const km =
-      await extractPlayerKm(
-        page,
-        player.name
+      await extractDistance(
+        page
       );
 
 
-    if (km !== null) {
+    if (
+      Number.isFinite(km)
+    ) {
 
       console.log(
         `RESULTADO ${player.name}: ${km} KM`
@@ -1035,34 +406,49 @@ async function readPlayerStats({
 
 
     /*
-     * Se não achou, mostra URL final e trecho da página.
+     * NÃO ENCONTROU
      */
+
+    console.log(
+      "======================================"
+    );
+
+    console.log(
+      "KM NÃO ENCONTRADO"
+    );
+
+    console.log(
+      "Jogador:",
+      player.name
+    );
 
     console.log(
       "URL FINAL:",
       page.url()
     );
 
-
-    const body =
-      await page.locator(
-        "body"
-      ).innerText();
-
-
     console.log(
-      "TRECHO FINAL DA PÁGINA:"
+      "======================================"
     );
 
+
+    const body =
+      await page
+        .locator("body")
+        .innerText();
+
+
     console.log(
-      body.slice(0, 6000)
+      body.slice(
+        0,
+        10000
+      )
     );
 
 
     throw new Error(
-      `Não foi possível obter KM de ${player.name}`
+      `KM não encontrado para ${player.name}`
     );
-
 
   } finally {
 
@@ -1074,7 +460,7 @@ async function readPlayerStats({
 
 /* =========================================================
    MONTHLY
-========================================================= */
+   ========================================================= */
 
 async function getMonthly() {
 
@@ -1091,12 +477,13 @@ async function getMonthly() {
     }
 
   };
+
 }
 
 
 /* =========================================================
    ALL-TIME
-========================================================= */
+   ========================================================= */
 
 async function getAllTime(browser) {
 
@@ -1113,85 +500,111 @@ async function getAllTime(browser) {
   );
 
 
+  /*
+   * GUILHERME REAL
+   */
+
   const guilhermeReal =
     await readPlayerStats({
       browser,
       period: "alltime",
       mode: "real",
-      player: players.guilherme
+      player:
+        players.guilherme
     });
 
+
+  /*
+   * GUILHERME RACE
+   */
 
   const guilhermeRace =
     await readPlayerStats({
       browser,
       period: "alltime",
       mode: "race",
-      player: players.guilherme
+      player:
+        players.guilherme
     });
 
+
+  /*
+   * FANTASMA REAL
+   */
 
   const fantasmaReal =
     await readPlayerStats({
       browser,
       period: "alltime",
       mode: "real",
-      player: players.fantasma
+      player:
+        players.fantasma
     });
 
 
   return {
 
     guilherme: {
+
       km:
         guilhermeReal +
         guilhermeRace,
 
       mode:
         "Real + Race"
+
     },
 
     fantasma: {
+
       km:
         fantasmaReal,
 
       mode:
         "Real"
+
     }
 
   };
+
 }
-
-
 /* =========================================================
    REFRESH
-========================================================= */
+   ========================================================= */
 
-async function refresh() {
+let refreshPromise = null;
 
-  console.log(
-    "ATUALIZANDO TRUCKERS DUEL"
-  );
+async function doRefresh() {
 
-  console.log(
-    new Date().toISOString()
-  );
-
-
-  const monthly =
-    await getMonthly();
+  console.log("");
+  console.log("======================================");
+  console.log("INICIANDO ATUALIZAÇÃO");
+  console.log("======================================");
 
 
-  let alltime;
-
-
-  const browser =
-    await chromium.launch({
-      headless: true
-    });
+  let browser = null;
 
 
   try {
+
+    browser =
+      await chromium.launch({
+        headless: true,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu"
+        ]
+      });
+
+
+    const monthly =
+      await getMonthly();
+
+
+    let alltime;
+
 
     try {
 
@@ -1203,197 +616,311 @@ async function refresh() {
     } catch (error) {
 
       console.error(
-        "ERRO NO ALL-TIME:"
+        "ERRO AO BUSCAR ALL-TIME:"
       );
 
       console.error(
-        error
+        error.message
       );
 
 
-      let previous = null;
-
+      /*
+       * Se já existir informação anterior,
+       * mantém os dados antigos em vez
+       * de apagar o resultado da API.
+       */
 
       if (
-        fs.existsSync(DATA_FILE)
+        cache &&
+        cache.alltime
       ) {
 
-        try {
+        console.log(
+          "Mantendo ALL-TIME anterior."
+        );
 
-          previous =
-            JSON.parse(
-              fs.readFileSync(
-                DATA_FILE,
-                "utf8"
-              )
-            );
+        alltime =
+          cache.alltime;
 
-        } catch (_) {}
+      } else {
+
+        alltime = {
+
+          guilherme: {
+            km: null,
+            mode: "Real + Race"
+          },
+
+          fantasma: {
+            km: null,
+            mode: "Real"
+          }
+
+        };
 
       }
-
-
-      alltime = {
-
-        guilherme: {
-          km:
-            Number.isFinite(
-              previous?.alltime?.guilherme?.km
-            )
-              ? previous.alltime.guilherme.km
-              : null,
-
-          mode:
-            "Real + Race"
-        },
-
-        fantasma: {
-          km:
-            Number.isFinite(
-              previous?.alltime?.fantasma?.km
-            )
-              ? previous.alltime.fantasma.km
-              : null,
-
-          mode:
-            "Real"
-        }
-
-      };
 
     }
 
-  } finally {
 
-    await browser.close();
+    const result = {
 
-  }
-
-
-  let history = [];
-
-
-  if (
-    fs.existsSync(DATA_FILE)
-  ) {
-
-    try {
-
-      const old =
-        JSON.parse(
-          fs.readFileSync(
-            DATA_FILE,
-            "utf8"
-          )
-        );
-
-
-      if (
-        Array.isArray(
-          old.history
-        )
-      ) {
-
-        history =
-          old.history;
-
-      }
-
-    } catch (_) {}
-
-  }
-
-
-  if (
-    Number.isFinite(
-      alltime.guilherme.km
-    ) &&
-    Number.isFinite(
-      alltime.fantasma.km
-    )
-  ) {
-
-    history.push({
-      at:
+      updatedAt:
         new Date().toISOString(),
 
-      g:
-        alltime.guilherme.km,
+      monthLabel:
+        getMonthLabel(),
 
-      f:
-        alltime.fantasma.km
+      monthly,
+
+      alltime,
+
+      history:
+        cache &&
+        Array.isArray(cache.history)
+          ? cache.history
+          : []
+
+    };
+
+
+    /*
+     * Adiciona histórico.
+     */
+
+    result.history.push({
+
+      date:
+        result.updatedAt,
+
+      guilherme:
+        result.monthly.guilherme.km,
+
+      fantasma:
+        result.monthly.fantasma.km
+
     });
 
 
-    history =
-      history.slice(-30);
+    /*
+     * Limita histórico.
+     */
+
+    if (
+      result.history.length > 100
+    ) {
+
+      result.history =
+        result.history.slice(-100);
+
+    }
+
+
+    cache =
+      result;
+
+    cacheAt =
+      Date.now();
+
+
+    /*
+     * Salva no data.json
+     */
+
+    try {
+
+      fs.writeFileSync(
+        DATA_FILE,
+        JSON.stringify(
+          result,
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      console.log(
+        "data.json atualizado."
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Erro salvando data.json:",
+        error.message
+      );
+
+    }
+
+
+    console.log("");
+    console.log(
+      "======================================"
+    );
+    console.log(
+      "ATUALIZAÇÃO CONCLUÍDA"
+    );
+    console.log(
+      "======================================"
+    );
+
+
+    console.log(
+      JSON.stringify(
+        result,
+        null,
+        2
+      )
+    );
+
+
+    return result;
+
+
+  } finally {
+
+    if (browser) {
+
+      try {
+
+        await browser.close();
+
+      } catch (_) {}
+
+    }
+
+  }
+
+}
+
+
+/* =========================================================
+   REFRESH COM PROTEÇÃO
+   ========================================================= */
+
+async function refresh(
+  force = false
+) {
+
+  /*
+   * Se já existe uma atualização em andamento,
+   * não abre outro Chromium.
+   */
+
+  if (refreshPromise) {
+
+    console.log(
+      "Atualização já está em andamento."
+    );
+
+    return refreshPromise;
+
   }
 
 
-  const result = {
+  /*
+   * Usa cache se ainda estiver válido.
+   */
 
-    updatedAt:
-      new Date().toISOString(),
+  if (
+    !force &&
+    cache &&
+    Date.now() - cacheAt < CACHE_MS
+  ) {
 
-    monthLabel:
-      getMonthLabel(),
+    console.log(
+      "Usando cache."
+    );
 
-    monthly,
+    return cache;
 
-    alltime,
-
-    history
-
-  };
-
-
-  fs.writeFileSync(
-    DATA_FILE,
-    JSON.stringify(
-      result,
-      null,
-      2
-    )
-  );
+  }
 
 
-  cache =
-    result;
-
-  cacheAt =
-    Date.now();
+  refreshPromise =
+    doRefresh();
 
 
-  console.log(
-    "======================================"
-  );
+  try {
 
-  console.log(
-    "RESULTADO FINAL"
-  );
+    return await refreshPromise;
 
-  console.log(
-    "Guilherme All-time:",
-    alltime.guilherme.km
-  );
+  } finally {
 
-  console.log(
-    "Fantasma All-time:",
-    alltime.fantasma.km
-  );
+    refreshPromise =
+      null;
 
-  console.log(
-    "======================================"
-  );
+  }
+
+}
 
 
-  return result;
+/* =========================================================
+   CARREGAR DATA.JSON
+   ========================================================= */
+
+function loadCache() {
+
+  try {
+
+    if (
+      !fs.existsSync(
+        DATA_FILE
+      )
+    ) {
+
+      return;
+
+    }
+
+
+    const text =
+      fs.readFileSync(
+        DATA_FILE,
+        "utf8"
+      );
+
+
+    const data =
+      JSON.parse(text);
+
+
+    if (
+      data &&
+      typeof data === "object"
+    ) {
+
+      cache =
+        data;
+
+      /*
+       * Não considera o arquivo antigo
+       * como cache fresco.
+       */
+
+      cacheAt = 0;
+
+      console.log(
+        "Cache inicial carregado."
+      );
+
+    }
+
+  } catch (error) {
+
+    console.error(
+      "Erro carregando data.json:",
+      error.message
+    );
+
+  }
+
 }
 
 
 /* =========================================================
    API
-========================================================= */
+   ========================================================= */
 
 app.get(
   "/api/stats",
@@ -1401,31 +928,46 @@ app.get(
 
     try {
 
-      if (
-        !cache ||
-        Date.now() - cacheAt >
-        CACHE_MS
-      ) {
-
-        await refresh();
-
-      }
+      const force =
+        req.query.refresh === "1" ||
+        req.query.force === "1";
 
 
-      res.json(
-        cache
-      );
+      const data =
+        await refresh(force);
+
+
+      res.json(data);
 
     } catch (error) {
 
       console.error(
+        "API /api/stats:",
         error
       );
 
 
-      res.status(503).json({
+      /*
+       * Se houver cache, devolve o cache.
+       */
+
+      if (cache) {
+
+        return res.json(
+          cache
+        );
+
+      }
+
+
+      res.status(500).json({
+
         error:
+          "Não foi possível obter os dados.",
+
+        message:
           error.message
+
       });
 
     }
@@ -1435,8 +977,87 @@ app.get(
 
 
 /* =========================================================
+   API REFRESH
+   ========================================================= */
+
+app.get(
+  "/api/refresh",
+  async (req, res) => {
+
+    try {
+
+      const data =
+        await refresh(true);
+
+
+      res.json(data);
+
+    } catch (error) {
+
+      console.error(
+        "API /api/refresh:",
+        error
+      );
+
+
+      res.status(500).json({
+
+        error:
+          "Erro ao atualizar.",
+
+        message:
+          error.message
+
+      });
+
+    }
+
+  }
+);
+
+
+/* =========================================================
+   HEALTH CHECK
+   ========================================================= */
+
+app.get(
+  "/health",
+  (req, res) => {
+
+    res.json({
+
+      ok: true,
+
+      service:
+        "truckers-duel",
+
+      time:
+        new Date().toISOString()
+
+    });
+
+  }
+);
+
+
+/* =========================================================
    FRONTEND
-========================================================= */
+   ========================================================= */
+
+app.use(
+  express.static(
+    path.join(
+      __dirname,
+      "..",
+      "public"
+    )
+  )
+);
+
+
+/* =========================================================
+   FALLBACK
+   ========================================================= */
 
 app.get(
   "/{*splat}",
@@ -1445,7 +1066,9 @@ app.get(
     res.sendFile(
       path.join(
         __dirname,
-        "../public/index.html"
+        "..",
+        "public",
+        "index.html"
       )
     );
 
@@ -1455,14 +1078,31 @@ app.get(
 
 /* =========================================================
    START
-========================================================= */
+   ========================================================= */
+
+loadCache();
+
 
 app.listen(
   PORT,
   () => {
 
+    console.log("");
     console.log(
-      `Truckers Duel listening on ${PORT}`
+      "======================================"
+    );
+
+    console.log(
+      "TRUCKERS DUEL ONLINE"
+    );
+
+    console.log(
+      "PORT:",
+      PORT
+    );
+
+    console.log(
+      "======================================"
     );
 
   }
